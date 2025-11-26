@@ -78,10 +78,28 @@ cd parallel-cc
 ```
 
 The install script will:
-1. ✅ Build the TypeScript project
-2. ✅ Create symlinks in `~/.local/bin`
-3. ✅ Install the `claude-parallel` wrapper script
+1. ✅ Check all dependencies (Node.js 20+, git, jq, gtr)
+2. ✅ Build the TypeScript project
+3. ✅ Install CLI and wrapper scripts to `~/.local/bin`
 4. ✅ Create the database directory
+5. ✅ Verify installation with `parallel-cc doctor`
+6. ✅ Provide shell-specific setup instructions
+
+### Advanced Installation
+
+**Custom installation directory:**
+```bash
+export PARALLEL_CC_INSTALL_DIR="$HOME/bin"
+export PARALLEL_CC_DATA_DIR="$HOME/.config/parallel-cc"
+./scripts/install.sh
+```
+
+**Uninstall:**
+```bash
+./scripts/uninstall.sh
+```
+
+The uninstall script safely removes all installed files while preserving your session data.
 
 ### Recommended: Create an alias
 
