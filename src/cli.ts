@@ -5,6 +5,7 @@
 
 import { program } from 'commander';
 import chalk from 'chalk';
+import { execSync } from 'child_process';
 import { Coordinator } from './coordinator.js';
 import { GtrWrapper } from './gtr.js';
 import { DEFAULT_CONFIG } from './types.js';
@@ -182,7 +183,7 @@ program
     // Check git
     let gitAvailable = false;
     try {
-      require('child_process').execSync('git --version', { stdio: 'pipe' });
+      execSync('git --version', { stdio: 'pipe' });
       gitAvailable = true;
     } catch {}
     const gitStatus = gitAvailable ? chalk.green('✓') : chalk.red('✗');
