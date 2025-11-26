@@ -11,18 +11,20 @@ import { DEFAULT_CONFIG } from './types.js';
 
 export class SessionDB {
   private db: Database.Database;
-  
+
   constructor(dbPath?: string) {
     const resolvedPath = this.resolvePath(dbPath ?? DEFAULT_CONFIG.dbPath);
-    
+
     // Ensure directory exists
     const dir = dirname(resolvedPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    
+
     this.db = new Database(resolvedPath);
     this.db.pragma('journal_mode = WAL');
+    // Set busy timeout for better concurrent access
+    this.db.pragma('busy_timeout = 5000');
     this.init();
   }
   
@@ -167,7 +169,14 @@ export class SessionDB {
       is_main_repo: row.is_main_repo === 1
     };
   }
-  
+
+  /**
+   * Execute a function within a transaction for atomicity
+   */
+  transaction<T>(fn: () => T): () => T {
+    return this.db.transaction(fn);
+  }
+
   close(): void {
     this.db.close();
   }

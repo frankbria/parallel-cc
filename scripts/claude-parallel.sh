@@ -26,6 +26,14 @@ if ! command -v parallel-cc &> /dev/null; then
     exec claude "$@"
 fi
 
+# Check if jq is available (required for JSON parsing)
+if ! command -v jq &> /dev/null; then
+    echo "⚠️  jq not found - required for parallel-cc coordination" >&2
+    echo "   Install: https://jqlang.github.io/jq/download/" >&2
+    echo "   Running claude without coordination" >&2
+    exec claude "$@"
+fi
+
 # Register and get worktree path
 RESULT=$(parallel-cc register --repo "$REPO_PATH" --pid $$ --json 2>/dev/null || echo '{}')
 

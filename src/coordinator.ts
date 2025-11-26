@@ -6,6 +6,7 @@ import { execSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { SessionDB } from './db.js';
 import { GtrWrapper } from './gtr.js';
+import { logger } from './logger.js';
 import type {
   RegisterResult,
   StatusResult,
@@ -28,9 +29,17 @@ export class Coordinator {
    * Register a new session. Creates worktree if parallel session exists.
    */
   register(repoPath: string, pid: number): RegisterResult {
+    // Validate inputs
+    if (!repoPath || typeof repoPath !== 'string') {
+      throw new Error('Invalid repository path');
+    }
+    if (!pid || pid <= 0 || pid > 2147483647) {
+      throw new Error('Invalid process ID');
+    }
+
     // Normalize repo path
     const normalizedRepo = this.normalizeRepoPath(repoPath);
-    
+
     // Check for existing session with this PID (re-registration)
     const existing = this.db.getSessionByPid(pid);
     if (existing) {
@@ -46,51 +55,58 @@ export class Coordinator {
 
     // Clean up stale sessions first
     this.cleanupStaleSessions();
-    
-    // Check for parallel sessions in this repo
-    const existingSessions = this.db.getSessionsByRepo(normalizedRepo)
-      .filter(s => this.isProcessAlive(s.pid));
-    
-    const sessionId = randomUUID();
-    let worktreePath = normalizedRepo;
-    let worktreeName: string | null = null;
-    let isMainRepo = true;
-    
-    if (existingSessions.length > 0) {
-      // Parallel session exists - create a worktree
-      const gtr = new GtrWrapper(normalizedRepo);
-      worktreeName = GtrWrapper.generateWorktreeName(this.config.worktreePrefix);
-      
-      const result = gtr.createWorktree(worktreeName);
-      if (result.success) {
-        worktreePath = gtr.getWorktreePath(worktreeName) ?? normalizedRepo;
-        isMainRepo = false;
-      } else {
-        // Worktree creation failed - log but continue in main repo
-        console.error(`Warning: Could not create worktree: ${result.error}`);
-        console.error('Continuing in main repo - be careful of conflicts!');
-        worktreeName = null;
-      }
-    }
-    
-    // Create session record
-    this.db.createSession({
-      id: sessionId,
-      pid,
-      repo_path: normalizedRepo,
-      worktree_path: worktreePath,
-      worktree_name: worktreeName,
-      is_main_repo: isMainRepo
-    });
 
-    return {
-      sessionId,
-      worktreePath,
-      worktreeName,
-      isNew: true,
-      isMainRepo,
-      parallelSessions: existingSessions.length + 1
-    };
+    // CRITICAL: Use transaction to make check-then-create atomic
+    // This prevents race condition where two sessions both think they're first
+    return this.db.transaction(() => {
+      // Check for parallel sessions in this repo (within transaction)
+      const existingSessions = this.db.getSessionsByRepo(normalizedRepo)
+        .filter(s => this.isProcessAlive(s.pid));
+
+      const sessionId = randomUUID();
+      let worktreePath = normalizedRepo;
+      let worktreeName: string | null = null;
+      let isMainRepo = true;
+
+      if (existingSessions.length > 0) {
+        // Parallel session exists - create a worktree
+        const gtr = new GtrWrapper(normalizedRepo);
+        worktreeName = GtrWrapper.generateWorktreeName(this.config.worktreePrefix);
+
+        const result = gtr.createWorktree(worktreeName);
+        if (result.success) {
+          worktreePath = gtr.getWorktreePath(worktreeName) ?? normalizedRepo;
+          isMainRepo = false;
+          logger.info(`Created worktree: ${worktreeName} at ${worktreePath}`);
+        } else {
+          // Worktree creation failed - log but continue in main repo
+          logger.error(`Could not create worktree: ${result.error}`);
+          logger.warn('Continuing in main repo - be careful of conflicts!');
+          console.error(`Warning: Could not create worktree: ${result.error}`);
+          console.error('Continuing in main repo - be careful of conflicts!');
+          worktreeName = null;
+        }
+      }
+
+      // Create session record (within transaction)
+      this.db.createSession({
+        id: sessionId,
+        pid,
+        repo_path: normalizedRepo,
+        worktree_path: worktreePath,
+        worktree_name: worktreeName,
+        is_main_repo: isMainRepo
+      });
+
+      return {
+        sessionId,
+        worktreePath,
+        worktreeName,
+        isNew: true,
+        isMainRepo,
+        parallelSessions: existingSessions.length + 1
+      };
+    })();
   }
   
   /**
@@ -116,6 +132,11 @@ export class Coordinator {
       const gtr = new GtrWrapper(session.repo_path);
       const result = gtr.removeWorktree(session.worktree_name, true);
       worktreeRemoved = result.success;
+      if (result.success) {
+        logger.info(`Removed worktree: ${session.worktree_name}`);
+      } else {
+        logger.error(`Failed to remove worktree ${session.worktree_name}: ${result.error}`);
+      }
     }
     
     // Delete session record
@@ -176,6 +197,9 @@ export class Coordinator {
           const result = gtr.removeWorktree(session.worktree_name, true);
           if (result.success) {
             worktreesRemoved.push(session.worktree_name);
+            logger.info(`Cleanup: Removed stale worktree ${session.worktree_name}`);
+          } else {
+            logger.error(`Cleanup: Failed to remove worktree ${session.worktree_name}: ${result.error}`);
           }
         }
         
@@ -221,8 +245,9 @@ export class Coordinator {
         stdio: 'pipe'
       }).trim();
       return gitRoot;
-    } catch {
+    } catch (error) {
       // Not a git repo or git not available - use as-is
+      logger.warn(`Could not normalize repo path ${repoPath}: ${error instanceof Error ? error.message : 'unknown error'}`);
       return repoPath;
     }
   }

@@ -3,6 +3,7 @@
  */
 
 import { execSync, exec } from 'child_process';
+import { logger } from './logger.js';
 import type { GtrResult, GtrListEntry } from './types.js';
 
 export class GtrWrapper {
@@ -19,7 +20,8 @@ export class GtrWrapper {
     try {
       execSync('gtr version', { stdio: 'pipe' });
       return true;
-    } catch {
+    } catch (error) {
+      logger.debug('gtr not available', error);
       return false;
     }
   }
@@ -53,7 +55,8 @@ export class GtrWrapper {
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
       return output.trim();
-    } catch {
+    } catch (error) {
+      logger.error(`Failed to get worktree path for ${name}`, error);
       return null;
     }
   }
@@ -116,8 +119,9 @@ export class GtrWrapper {
       }
       
       return entries;
-    } catch {
+    } catch (error) {
       // Fallback to git worktree list if gtr fails
+      logger.warn(`gtr list failed, falling back to git worktree list: ${error instanceof Error ? error.message : 'unknown error'}`);
       return this.listWorktreesGit();
     }
   }
@@ -158,7 +162,8 @@ export class GtrWrapper {
       }
       
       return entries;
-    } catch {
+    } catch (error) {
+      logger.error('Failed to list worktrees via git', error);
       return [];
     }
   }
