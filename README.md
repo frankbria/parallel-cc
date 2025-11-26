@@ -1,18 +1,51 @@
 # parallel-cc
 
-Coordinate parallel Claude Code sessions using git worktrees.
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> Coordinate parallel Claude Code sessions using git worktrees.
+
+**parallel-cc** eliminates the chaos of running multiple Claude Code instances in the same repository by automatically creating isolated git worktrees for each session.
+
+## 📑 Table of Contents
+
+- [Features](#-features)
+- [The Problem](#the-problem)
+- [The Solution](#the-solution)
+- [How It Works](#how-it-works)
+- [Requirements](#-requirements)
+- [Installation](#-installation)
+- [Usage](#-usage)
+- [CLI Commands](#-cli-commands)
+- [How Sessions Work](#-how-sessions-work)
+- [Configuration](#️-configuration)
+- [Merging Work from Worktrees](#-merging-work-from-worktrees)
+- [Roadmap](#️-roadmap)
+- [Troubleshooting](#-troubleshooting)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+## ✨ Features
+
+- 🔄 **Automatic worktree creation** - No manual setup required
+- 🗄️ **SQLite-based coordination** - Fast, reliable session tracking
+- 🧹 **Auto-cleanup** - Worktrees removed when sessions end
+- 💓 **Heartbeat monitoring** - Detect and clean up stale sessions
+- 🎯 **Zero configuration** - Works out of the box
 
 ## The Problem
 
 When you open multiple Claude Code sessions in the same repository, they can step on each other:
-- Git index locks when both try to commit
-- Build artifacts conflict
-- Dependencies get corrupted
-- General chaos ensues
+- ❌ Git index locks when both try to commit
+- ❌ Build artifacts conflict
+- ❌ Dependencies get corrupted
+- ❌ General chaos ensues
 
 ## The Solution
 
-`parallel-cc` automatically detects when you're starting a parallel session and creates an isolated git worktree for you. Each Claude Code instance works in its own space, then changes merge cleanly.
+✅ `parallel-cc` automatically detects when you're starting a parallel session and creates an isolated git worktree for you. Each Claude Code instance works in its own space, then changes merge cleanly.
 
 ## How It Works
 
@@ -29,26 +62,26 @@ When you open multiple Claude Code sessions in the same repository, they can ste
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Requirements
+## 📋 Requirements
 
-- Node.js 20+
-- [gtr (git-worktree-runner)](https://github.com/coderabbitai/git-worktree-runner)
-- `jq` (for JSON parsing in wrapper script)
+- **Node.js** 20+
+- **[gtr](https://github.com/coderabbitai/git-worktree-runner)** - Git worktree management
+- **jq** - JSON parsing in wrapper script
 
-## Installation
+## 🚀 Installation
 
 ```bash
 # Clone and install
-git clone https://github.com/yourusername/parallel-cc
+git clone https://github.com/frankbria/parallel-cc.git
 cd parallel-cc
 ./scripts/install.sh
 ```
 
 The install script will:
-1. Build the TypeScript project
-2. Create symlinks in `~/.local/bin`
-3. Install the `claude-parallel` wrapper script
-4. Create the database directory
+1. ✅ Build the TypeScript project
+2. ✅ Create symlinks in `~/.local/bin`
+3. ✅ Install the `claude-parallel` wrapper script
+4. ✅ Create the database directory
 
 ### Recommended: Create an alias
 
@@ -82,7 +115,7 @@ For better stale session detection, add to `~/.claude/settings.json`:
 }
 ```
 
-## Usage
+## 📖 Usage
 
 Just open multiple terminals and run `claude` (or `claude-parallel`) in each:
 
@@ -100,7 +133,7 @@ claude  # Automatically gets a worktree!
 
 That's it! Each session is isolated. When you're done, just exit claude normally - the worktree is cleaned up automatically.
 
-## CLI Commands
+## 🔧 CLI Commands
 
 ```bash
 # Check system health
@@ -121,7 +154,7 @@ parallel-cc release --pid $$
 parallel-cc cleanup
 ```
 
-## How Sessions Work
+## 🔄 How Sessions Work
 
 1. **First session** in a repo gets the main repository
 2. **Subsequent sessions** automatically get a new worktree
@@ -129,7 +162,7 @@ parallel-cc cleanup
 4. **Stale detection** cleans up crashed sessions after 10 minutes
 5. **Auto-cleanup** removes worktrees when sessions end
 
-## Configuration
+## ⚙️ Configuration
 
 Default config (in `src/types.ts`):
 
@@ -142,7 +175,7 @@ Default config (in `src/types.ts`):
 }
 ```
 
-## Merging Work from Worktrees
+## 🔀 Merging Work from Worktrees
 
 After working in a worktree, you'll want to merge your changes:
 
@@ -160,15 +193,15 @@ cd ~/projects/myrepo  # Go to main repo
 git merge <worktree-branch-name>
 ```
 
-## Roadmap
+## 🗺️ Roadmap
 
-- [x] v0.1 - Project structure
-- [x] v0.2 - CLI + SQLite + wrapper script
-- [ ] v0.3 - MCP server for status queries
-- [ ] v0.4 - Branch merge detection + notifications
-- [ ] v0.5 - File-level conflict detection
+- [x] **v0.1** - Project structure
+- [x] **v0.2** - CLI + SQLite + wrapper script
+- [ ] **v0.3** - MCP server for status queries
+- [ ] **v0.4** - Branch merge detection + notifications
+- [ ] **v0.5** - File-level conflict detection
 
-## Troubleshooting
+## 🔍 Troubleshooting
 
 ### "parallel-cc not found"
 
@@ -196,6 +229,14 @@ parallel-cc cleanup
 parallel-cc doctor
 ```
 
-## License
+## 🤝 Contributing
 
-MIT
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## 📄 License
+
+MIT © [Frank Bria](https://github.com/frankbria)
+
+---
+
+**Built with ❤️ using TypeScript, SQLite, and git worktrees**
