@@ -28,9 +28,16 @@ fi
 
 # Register and get worktree path
 RESULT=$(parallel-cc register --repo "$REPO_PATH" --pid $$ --json 2>/dev/null || echo '{}')
-WORKTREE_PATH=$(echo "$RESULT" | jq -r '.worktreePath // empty' 2>/dev/null || true)
-IS_NEW=$(echo "$RESULT" | jq -r '.isNew // false' 2>/dev/null || echo "false")
-PARALLEL_COUNT=$(echo "$RESULT" | jq -r '.parallelSessions // 1' 2>/dev/null || echo "1")
+
+# Parse JSON results - ensure clean integers/strings
+WORKTREE_PATH=$(echo "$RESULT" | jq -r '.worktreePath // empty' 2>/dev/null | tr -d '\n' || true)
+IS_NEW=$(echo "$RESULT" | jq -r '.isNew // false' 2>/dev/null | tr -d '\n' || echo "false")
+PARALLEL_COUNT=$(echo "$RESULT" | jq -r '.parallelSessions // 1' 2>/dev/null | tr -d '\n' || echo "1")
+
+# Ensure PARALLEL_COUNT is a valid integer, default to 1
+if ! [[ "$PARALLEL_COUNT" =~ ^[0-9]+$ ]]; then
+    PARALLEL_COUNT=1
+fi
 
 # If we got a different worktree path, cd into it
 if [ -n "$WORKTREE_PATH" ] && [ "$WORKTREE_PATH" != "$REPO_PATH" ]; then
