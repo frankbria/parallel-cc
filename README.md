@@ -1,6 +1,6 @@
 # parallel-cc
 
-[![Version](https://img.shields.io/badge/version-0.2.4-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -251,10 +251,10 @@ git merge <worktree-branch-name>
 - [x] **v0.1** - Project foundation (structure, types, schema)
 - [x] **v0.2** - Core infrastructure (CLI + SQLite + wrapper script)
 - [x] **v0.2.1** - Hook installation & configuration
-- [x] **v0.2.4** - Shell alias setup & full installation command ← *Current*
+- [x] **v0.2.4** - Shell alias setup & full installation command
+- [x] **v0.3** - MCP server for status queries + >85% test coverage ← *Current*
 
 **Planned:**
-- [ ] **v0.3** - MCP server for status queries + >85% test coverage
 - [ ] **v0.4** - Branch merge detection & rebase assistance
 - [ ] **v0.5** - File-level conflict detection
 - [ ] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 *Major milestone*

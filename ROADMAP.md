@@ -16,10 +16,10 @@ All versions are linked for easy navigation, and each section includes status, o
 - **[v0.1](#v01---project-foundation)** - Project structure, types, schema design ✅
 - **[v0.2](#v02---core-infrastructure)** - CLI + SQLite + wrapper script ✅
 - **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration ✅
-- **[v0.2.3-v0.2.4](#installation-improvements)** - Shell alias setup + full installation command ✅ (current)
+- **[v0.2.3-v0.2.4](#installation-improvements)** - Shell alias setup + full installation command ✅
+- **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries ✅ (current)
 
 ### Planned Versions
-- **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries
 - **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance
 - **[v0.5](#v05---file-level-conflict-detection)** - File-Level Conflict Detection
 - **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration for Autonomous Execution (major milestone)
@@ -43,7 +43,7 @@ Initial project architecture establishing the foundation for parallel Claude Cod
 
 ## v0.2 - Core Infrastructure
 
-**Status:** Completed ✅ (Current Version)
+**Status:** Completed ✅
 
 ### Overview
 Implemented the complete CLI, database layer, and wrapper script for basic parallel session coordination.
@@ -187,15 +187,15 @@ parallel-cc install --status
 
 ## v0.3 - MCP Server for Status Queries
 
-**Status:** Planned
+**Status:** Completed ✅ (Current Version)
 
 ### Overview
-Add an MCP server so Claude Code can query the coordinator mid-session to understand what other sessions are doing.
+Added MCP server so Claude Code can query the coordinator mid-session to understand what other sessions are doing.
 
-### Testing Requirements
-- Achieve **>85% test coverage** across all source files
-- Add comprehensive tests for coordinator.ts, db.ts, and gtr.ts modules
-- Integration tests for MCP server tools
+### Achievements
+- **>85% test coverage** achieved across all source files (267 tests, 100% passing)
+- Comprehensive tests for coordinator.ts (100%), db.ts (98%+), and gtr.ts (100%)
+- Integration tests for all MCP server tools (50 tests)
 
 ### Tools to Implement
 
