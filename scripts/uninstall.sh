@@ -47,6 +47,18 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
+
+# Offer to remove configurations before removing binaries
+if [ -f "$INSTALL_DIR/parallel-cc" ]; then
+    read -p "Remove hooks, alias, and MCP config from settings? [y/N] " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print cleanup "Removing configurations..."
+        "$INSTALL_DIR/parallel-cc" install --uninstall 2>/dev/null || print warning "Some configs may need manual removal"
+        echo ""
+    fi
+fi
+
 print cleanup "Removing files..."
 
 # Remove CLI
@@ -79,13 +91,15 @@ fi
 print title "Uninstall complete!"
 
 print section "CLEANUP (OPTIONAL):"
+echo ""
 echo "To remove session data and database:"
 print step "rm -rf $DATA_DIR"
 echo ""
 echo "To remove shell alias (if you added one):"
-print step "Edit your shell profile and remove:"
-print step "alias claude='claude-parallel'"
+print step "Edit your shell profile and remove: alias claude='claude-parallel'"
 echo ""
-echo "To remove heartbeat hook (if you added one):"
-print step "Edit ~/.claude/settings.json and remove the PostToolUse hook"
+echo "To remove hooks and MCP config from Claude settings:"
+print step "Edit ~/.claude/settings.json and remove:"
+print step "  - PostToolUse hook (parallel-cc-heartbeat.sh)"
+print step "  - mcpServers.parallel-cc entry"
 echo ""
