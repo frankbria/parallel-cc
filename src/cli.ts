@@ -6,14 +6,38 @@
 import { program } from 'commander';
 import chalk from 'chalk';
 import { execSync } from 'child_process';
+import * as readline from 'readline';
 import { Coordinator } from './coordinator.js';
 import { GtrWrapper } from './gtr.js';
 import { DEFAULT_CONFIG } from './types.js';
+import {
+  installHooks,
+  uninstallHooks,
+  checkHooksStatus,
+  type InstallHooksOptions
+} from './hooks-installer.js';
 
 program
   .name('parallel-cc')
   .description('Coordinate parallel Claude Code sessions using git worktrees')
-  .version('0.2.0');
+  .version('0.2.1');
+
+/**
+ * Helper to prompt user for input (for interactive mode)
+ */
+function prompt(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
+    });
+  });
+}
 
 /**
  * Register a new session
@@ -260,6 +284,135 @@ program
     console.log(chalk.dim(`  Worktree prefix: ${DEFAULT_CONFIG.worktreePrefix}`));
 
     console.log('');
+  });
+
+/**
+ * Install hooks for better session tracking
+ */
+program
+  .command('install')
+  .description('Configure parallel-cc hooks and settings')
+  .option('--hooks', 'Install PostToolUse heartbeat hook for better session tracking')
+  .option('--global', 'Install to global settings (~/.claude/settings.json)')
+  .option('--local', 'Install to local settings (./.claude/settings.json)')
+  .option('--repo <path>', 'Repository path for local installation', process.cwd())
+  .option('--gitignore', 'Add .claude/ to .gitignore (for --local)')
+  .option('--uninstall', 'Remove installed hooks instead of installing')
+  .option('--status', 'Check current hook installation status')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    // Status check
+    if (options.status) {
+      const status = checkHooksStatus({ repoPath: options.repo });
+
+      if (options.json) {
+        console.log(JSON.stringify(status, null, 2));
+      } else {
+        console.log(chalk.bold('\nHook Installation Status\n'));
+
+        const globalStatus = status.globalInstalled
+          ? chalk.green('✓ Installed')
+          : chalk.dim('Not installed');
+        console.log(`  Global: ${globalStatus}`);
+        console.log(chalk.dim(`    Path: ${status.globalPath}`));
+
+        const localStatus = status.localInstalled
+          ? chalk.green('✓ Installed')
+          : chalk.dim('Not installed');
+        console.log(`  Local:  ${localStatus}`);
+        console.log(chalk.dim(`    Path: ${status.localPath}`));
+        console.log('');
+      }
+      return;
+    }
+
+    // Must specify --hooks for install/uninstall
+    if (!options.hooks) {
+      console.log(chalk.yellow('No action specified. Use --hooks to install heartbeat hooks.'));
+      console.log('');
+      console.log('Examples:');
+      console.log('  parallel-cc install --hooks           # Interactive mode');
+      console.log('  parallel-cc install --hooks --global  # Install globally');
+      console.log('  parallel-cc install --hooks --local   # Install locally');
+      console.log('  parallel-cc install --status          # Check status');
+      console.log('');
+      return;
+    }
+
+    // Uninstall mode
+    if (options.uninstall) {
+      const result = uninstallHooks({
+        global: options.global,
+        local: options.local,
+        repoPath: options.repo
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.success) {
+        console.log(chalk.green('✓ Hooks uninstalled'));
+        console.log(chalk.dim(`  From: ${result.settingsPath}`));
+      } else {
+        console.error(chalk.red(`✗ Uninstall failed: ${result.error}`));
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Interactive mode - prompt for global vs local
+    let installGlobal = options.global;
+    let installLocal = options.local;
+
+    if (!installGlobal && !installLocal) {
+      // Interactive mode
+      console.log(chalk.bold('\nInstall Heartbeat Hook\n'));
+      console.log('The heartbeat hook improves session tracking by updating');
+      console.log('timestamps each time Claude Code uses a tool.\n');
+
+      const answer = await prompt('Install globally or locally? [global/local/skip]: ');
+
+      if (answer === 'global' || answer === 'g') {
+        installGlobal = true;
+      } else if (answer === 'local' || answer === 'l') {
+        installLocal = true;
+      } else if (answer === 'skip' || answer === 's' || answer === '') {
+        console.log(chalk.yellow('Skipped hook installation.'));
+        return;
+      } else {
+        console.log(chalk.yellow(`Unknown option: ${answer}. Skipping.`));
+        return;
+      }
+    }
+
+    // Install hooks
+    const installOptions: InstallHooksOptions = {
+      global: installGlobal,
+      local: installLocal,
+      repoPath: options.repo,
+      addToGitignore: options.gitignore && installLocal
+    };
+
+    const result = installHooks(installOptions);
+
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.success) {
+      if (result.alreadyInstalled) {
+        console.log(chalk.green('✓ Hooks already installed'));
+      } else if (result.created) {
+        console.log(chalk.green('✓ Hooks installed (created new settings file)'));
+      } else {
+        console.log(chalk.green('✓ Hooks installed (merged with existing settings)'));
+      }
+      console.log(chalk.dim(`  Path: ${result.settingsPath}`));
+
+      if (result.gitignoreUpdated) {
+        console.log(chalk.dim('  Added .claude/ to .gitignore'));
+      }
+    } else {
+      console.error(chalk.red(`✗ Installation failed: ${result.error}`));
+      process.exit(1);
+    }
   });
 
 // Parse and execute

@@ -14,11 +14,10 @@ All versions are linked for easy navigation, and each section includes status, o
 ### Completed Versions
 
 - **[v0.1](#v01---project-foundation)** - Project structure, types, schema design ✅
-- **[v0.2](#v02---core-infrastructure)** - CLI + SQLite + wrapper script ✅ (current)
+- **[v0.2](#v02---core-infrastructure)** - CLI + SQLite + wrapper script ✅
+- **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration ✅ (current)
 
 ### Planned Versions
-
-- **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration (hooks during install + CLI command)
 - **[v0.2.3-v0.2.4](#installation-improvements)** - Additional installation enhancements (aliases, full setup automation)
 - **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries
 - **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance
@@ -66,7 +65,7 @@ Implemented the complete CLI, database layer, and wrapper script for basic paral
 
 ### v0.2.1 - Hook Installation & Configuration (PRIORITY)
 
-**Status:** Planned (High Priority)
+**Status:** Completed ✅
 
 **Overview:** Automate heartbeat hook setup both during initial installation and via CLI command for existing installations.
 
@@ -188,6 +187,11 @@ parallel-cc install --interactive
 
 ### Overview
 Add an MCP server so Claude Code can query the coordinator mid-session to understand what other sessions are doing.
+
+### Testing Requirements
+- Achieve **>85% test coverage** across all source files
+- Add comprehensive tests for coordinator.ts, db.ts, and gtr.ts modules
+- Integration tests for MCP server tools
 
 ### Tools to Implement
 

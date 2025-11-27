@@ -286,6 +286,74 @@ else
 fi
 echo ""
 
+# Interactive hook setup
+install_hooks() {
+    echo ""
+    print step "The heartbeat hook improves session tracking by updating timestamps"
+    print step "each time Claude Code uses a tool."
+    echo ""
+
+    # Check if running interactively
+    if [ -t 0 ]; then
+        read -p "Would you like to add the heartbeat hook for better session tracking? [y/N]: " hook_answer
+        case "$hook_answer" in
+            [Yy]|[Yy][Ee][Ss])
+                echo ""
+                read -p "Install globally (~/.claude/settings.json) or locally (current repo)? [global/local/skip]: " location_answer
+                case "$location_answer" in
+                    [Gg]|[Gg][Ll][Oo][Bb][Aa][Ll])
+                        print step "Installing hooks globally..."
+                        if "$CLI_TARGET" install --hooks --global > /tmp/parallel-cc-hooks.log 2>&1; then
+                            print check "Heartbeat hook installed globally"
+                            print step "Location: ~/.claude/settings.json"
+                        else
+                            print warning "Hook installation failed. Check /tmp/parallel-cc-hooks.log"
+                            cat /tmp/parallel-cc-hooks.log
+                        fi
+                        ;;
+                    [Ll]|[Ll][Oo][Cc][Aa][Ll])
+                        print step "Installing hooks locally..."
+                        echo ""
+                        read -p "Add .claude/ to .gitignore? [y/N]: " gitignore_answer
+                        GITIGNORE_FLAG=""
+                        case "$gitignore_answer" in
+                            [Yy]|[Yy][Ee][Ss])
+                                GITIGNORE_FLAG="--gitignore"
+                                ;;
+                        esac
+                        if "$CLI_TARGET" install --hooks --local $GITIGNORE_FLAG > /tmp/parallel-cc-hooks.log 2>&1; then
+                            print check "Heartbeat hook installed locally"
+                            print step "Location: ./.claude/settings.json"
+                            if [ -n "$GITIGNORE_FLAG" ]; then
+                                print step "Added .claude/ to .gitignore"
+                            fi
+                        else
+                            print warning "Hook installation failed. Check /tmp/parallel-cc-hooks.log"
+                            cat /tmp/parallel-cc-hooks.log
+                        fi
+                        ;;
+                    *)
+                        print step "Skipped hook installation."
+                        print step "You can install later with: parallel-cc install --hooks"
+                        ;;
+                esac
+                ;;
+            *)
+                print step "Skipped hook installation."
+                print step "You can install later with: parallel-cc install --hooks"
+                ;;
+        esac
+    else
+        # Non-interactive mode - skip prompts
+        print step "Non-interactive mode detected. Skipping hook setup."
+        print step "To install hooks later, run: parallel-cc install --hooks"
+    fi
+    echo ""
+}
+
+# Offer to install hooks
+install_hooks
+
 # Detect shell and provide specific instructions
 SHELL_NAME=$(basename "$SHELL")
 SHELL_RC=""

@@ -28,16 +28,21 @@
 
 ```
 src/
-├── cli.ts         # Commander-based CLI entry point
-├── coordinator.ts # Core logic - session management
-├── db.ts          # SQLite operations via better-sqlite3
-├── gtr.ts         # Wrapper for gtr CLI commands (supports v1.x and v2.x)
-└── types.ts       # TypeScript type definitions
+├── cli.ts            # Commander-based CLI entry point
+├── coordinator.ts    # Core logic - session management
+├── db.ts             # SQLite operations via better-sqlite3
+├── gtr.ts            # Wrapper for gtr CLI commands (supports v1.x and v2.x)
+├── hooks-installer.ts # Hook configuration management for Claude settings
+├── logger.ts         # Logging utilities
+└── types.ts          # TypeScript type definitions
 
 scripts/
 ├── claude-parallel.sh  # Wrapper script (main entry point for users)
 ├── heartbeat.sh        # Optional hook for stale detection
-└── install.sh          # Installation script
+└── install.sh          # Installation script (with interactive hook setup)
+
+tests/
+└── hooks-installer.test.ts  # Tests for hooks-installer module
 ```
 
 ## Key Concepts
@@ -105,6 +110,8 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 | `status [--repo <path>]` | Show active sessions |
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
+| `install --hooks [--global\|--local]` | Install heartbeat hooks to Claude settings |
+| `install --status` | Check hook installation status |
 
 ## Integration Flow
 
