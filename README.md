@@ -113,6 +113,8 @@ Now every time you run `claude`, it automatically handles parallel coordination!
 
 ### Optional: Add heartbeat hook
 
+> **Note:** This will be automated in v0.2.1 during installation. For now, you can add it manually.
+
 For better stale session detection, add to `~/.claude/settings.json`:
 
 ```json
@@ -213,14 +215,19 @@ git merge <worktree-branch-name>
 
 ## 🗺️ Roadmap
 
-- [x] **v0.1** - Project structure
-- [x] **v0.2** - CLI + SQLite + wrapper script
-- [ ] **v0.2.x** - Interactive installation (alias & hooks setup)
-- [ ] **v0.3** - MCP server for status queries
-- [ ] **v0.4** - Branch merge detection + notifications
-- [ ] **v0.5** - File-level conflict detection
+**Completed:**
+- [x] **v0.1** - Project foundation (structure, types, schema)
+- [x] **v0.2** - Core infrastructure (CLI + SQLite + wrapper script) ← *Current*
 
-See [ROADMAP.md](./ROADMAP.md) for detailed feature specs and installation improvements.
+**Planned:**
+- [ ] **v0.2.1** - Hook installation & configuration (automate setup)
+- [ ] **v0.2.3-v0.2.4** - Additional installation enhancements
+- [ ] **v0.3** - MCP server for status queries
+- [ ] **v0.4** - Branch merge detection & rebase assistance
+- [ ] **v0.5** - File-level conflict detection
+- [ ] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 *Major milestone*
+
+See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and future ideas.
 
 ## 🔍 Troubleshooting
 
