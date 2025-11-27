@@ -443,36 +443,13 @@ if [ -n "$PATH_WARNING" ]; then
     echo ""
 fi
 
-echo "SETUP OPTIONS:"
+echo "ADDITIONAL SETUP (if skipped above):"
 echo ""
-echo "Option 1: Use 'claude-parallel' command directly"
-echo "   Just run 'claude-parallel' instead of 'claude'"
-echo ""
-echo "Option 2: Make it automatic with an alias (RECOMMENDED)"
-echo "   Add this to your $SHELL_RC:"
-echo ""
-echo "   alias claude='claude-parallel'"
-echo ""
-echo "Option 3: Add heartbeat hook for better stale detection"
-echo "   Add to ~/.claude/settings.json:"
-echo ""
-cat << HOOKJSON
-   {
-     "hooks": {
-       "PostToolUse": [
-         {
-           "matcher": "*",
-           "hooks": [
-             {
-               "type": "command",
-               "command": "$INSTALL_DIR/parallel-cc-heartbeat.sh"
-             }
-           ]
-         }
-       ]
-     }
-   }
-HOOKJSON
+echo "   parallel-cc install --all          # Full setup: hooks + alias + MCP"
+echo "   parallel-cc install --hooks        # Heartbeat hook for stale detection"
+echo "   parallel-cc install --alias        # Shell alias (claude=claude-parallel)"
+echo "   parallel-cc install --mcp          # MCP server for Claude Code integration"
+echo "   parallel-cc install --status       # Check what's installed"
 echo ""
 echo "VERIFY INSTALLATION:"
 echo "   parallel-cc doctor"
