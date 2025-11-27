@@ -15,10 +15,10 @@ All versions are linked for easy navigation, and each section includes status, o
 
 - **[v0.1](#v01---project-foundation)** - Project structure, types, schema design ✅
 - **[v0.2](#v02---core-infrastructure)** - CLI + SQLite + wrapper script ✅
-- **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration ✅ (current)
+- **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration ✅
+- **[v0.2.3-v0.2.4](#installation-improvements)** - Shell alias setup + full installation command ✅ (current)
 
 ### Planned Versions
-- **[v0.2.3-v0.2.4](#installation-improvements)** - Additional installation enhancements (aliases, full setup automation)
 - **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries
 - **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance
 - **[v0.5](#v05---file-level-conflict-detection)** - File-Level Conflict Detection
@@ -135,9 +135,9 @@ parallel-cc install --hooks --local  # Adds to ./.claude/settings.json
 
 ## Installation Improvements
 
-### v0.2.3 - Interactive Alias Setup (PRIORITY)
+### v0.2.3 - Interactive Alias Setup
 
-**Status:** Planned (High Priority)
+**Status:** Completed ✅
 
 Add optional prompt during `./scripts/install.sh` to automatically configure the shell alias:
 
@@ -157,14 +157,15 @@ Add optional prompt during `./scripts/install.sh` to automatically configure the
 5. If yes: append alias to profile file
 6. Show message: "✓ Alias added to ~/.bashrc - restart your shell or run: source ~/.bashrc"
 
-**Alternative:** Also support `--alias` flag for non-interactive mode:
+**CLI Command:**
 ```bash
-parallel-cc install --alias  # Adds alias without prompting
+parallel-cc install --alias  # Adds alias to shell profile
+parallel-cc install --alias --uninstall  # Removes alias
 ```
 
 ### v0.2.4 - Full Installation Command
 
-**Status:** Planned
+**Status:** Completed ✅
 
 Combine all installation options:
 
@@ -177,6 +178,9 @@ parallel-cc install --hooks --global --alias
 
 # Interactive mode (prompts for each option)
 parallel-cc install --interactive
+
+# Check installation status
+parallel-cc install --status
 ```
 
 ---

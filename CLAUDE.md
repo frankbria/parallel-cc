@@ -4,7 +4,7 @@
 
 `parallel-cc` is a coordinator for running multiple Claude Code sessions in parallel on the same repository. It uses git worktrees to isolate each session's work.
 
-**Current Version:** 0.2.1
+**Current Version:** 0.2.4
 
 ## Architecture
 
@@ -27,13 +27,14 @@
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  Hook Integration (v0.2.1)                                   │
-│  ─────────────────────────                                   │
-│  parallel-cc install --hooks                                 │
+│  Installation & Configuration (v0.2.4)                       │
+│  ─────────────────────────────────────                       │
+│  parallel-cc install --all (hooks + alias)                   │
 │       │                                                      │
-│       ├──► ~/.claude/settings.json (global)                 │
-│       │         or                                           │
-│       └──► ./.claude/settings.json (local)                  │
+│       ├──► Hooks: ~/.claude/settings.json (global)          │
+│       │         or ./.claude/settings.json (local)          │
+│       │                                                      │
+│       └──► Alias: ~/.bashrc / ~/.zshrc / config.fish        │
 │                                                              │
 │  PostToolUse hook → parallel-cc-heartbeat.sh                │
 │       └──► Updates session last_heartbeat in SQLite         │
@@ -53,11 +54,11 @@
 
 ```
 src/
-├── cli.ts             # Commander-based CLI entry point (v0.2.1)
+├── cli.ts             # Commander-based CLI entry point
 ├── coordinator.ts     # Core logic - session management
 ├── db.ts              # SQLite operations via better-sqlite3
 ├── gtr.ts             # Wrapper for gtr CLI commands (v1.x and v2.x)
-├── hooks-installer.ts # Hook configuration management (v0.2.1)
+├── hooks-installer.ts # Hook + alias configuration (v0.2.4)
 ├── logger.ts          # Logging utilities
 └── types.ts           # TypeScript type definitions
 
@@ -68,7 +69,7 @@ scripts/
 └── uninstall.sh        # Removal script
 
 tests/
-└── hooks-installer.test.ts  # Unit tests (41 tests, 92%+ coverage)
+└── hooks-installer.test.ts  # Unit tests (70+ tests, 92%+ coverage)
 
 vitest.config.ts  # Test framework configuration (project root)
 ```
@@ -160,11 +161,14 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 | `status [--repo <path>]` | Show active sessions |
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
+| `install --all` | Install hooks globally + shell alias |
+| `install --interactive` | Prompted installation for all options |
 | `install --hooks` | Install heartbeat hooks (interactive) |
 | `install --hooks --global` | Install hooks to ~/.claude/settings.json |
 | `install --hooks --local` | Install hooks to ./.claude/settings.json |
-| `install --hooks --uninstall` | Remove installed hooks |
-| `install --status` | Check hook installation status |
+| `install --alias` | Add claude=claude-parallel to shell profile |
+| `install --uninstall` | Remove installed hooks/alias |
+| `install --status` | Check installation status |
 
 ## Integration Flow
 
@@ -185,7 +189,8 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 |---------|--------|--------------|
 | v0.1 | ✅ Complete | Project foundation, types, schema |
 | v0.2 | ✅ Complete | CLI, SQLite, wrapper script |
-| v0.2.1 | ✅ Current | Hook installer CLI, Vitest testing |
+| v0.2.1 | ✅ Complete | Hook installer CLI, Vitest testing |
+| v0.2.4 | ✅ Current | Shell alias setup, full install command |
 | v0.3 | Planned | MCP server, >85% test coverage |
 | v0.4 | Planned | Branch merge detection |
 | v0.5 | Planned | File-level conflict detection |

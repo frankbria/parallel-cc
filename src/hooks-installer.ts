@@ -386,3 +386,332 @@ export function checkHooksStatus(options: { global?: boolean; local?: boolean; r
     localPath
   };
 }
+
+// ============================================================================
+// Alias Installation (v0.2.3)
+// ============================================================================
+
+export type ShellType = 'bash' | 'zsh' | 'fish' | 'unknown';
+
+export interface InstallAliasOptions {
+  /** Custom alias name (defaults to 'claude') */
+  aliasName?: string;
+  /** Custom target command (defaults to 'claude-parallel') */
+  targetCommand?: string;
+  /** Dry run - don't write files */
+  dryRun?: boolean;
+}
+
+export interface InstallAliasResult {
+  success: boolean;
+  shell: ShellType;
+  profilePath: string;
+  alreadyInstalled: boolean;
+  error?: string;
+}
+
+const ALIAS_COMMENT = '# parallel-cc: alias for claude-parallel wrapper';
+
+/**
+ * Detect the current shell type from $SHELL environment variable
+ */
+export function detectShell(): ShellType {
+  const shell = process.env.SHELL ?? '';
+  const shellName = shell.split('/').pop() ?? '';
+
+  if (shellName === 'bash') return 'bash';
+  if (shellName === 'zsh') return 'zsh';
+  if (shellName === 'fish') return 'fish';
+
+  return 'unknown';
+}
+
+/**
+ * Get the shell profile file path for the detected shell
+ */
+export function getShellProfilePath(shell: ShellType): string | null {
+  const home = homedir();
+
+  switch (shell) {
+    case 'bash':
+      // Prefer .bashrc for interactive shells, fallback to .bash_profile
+      const bashrc = join(home, '.bashrc');
+      const bashProfile = join(home, '.bash_profile');
+      if (existsSync(bashrc)) return bashrc;
+      if (existsSync(bashProfile)) return bashProfile;
+      return bashrc; // Default to .bashrc even if it doesn't exist
+    case 'zsh':
+      return join(home, '.zshrc');
+    case 'fish':
+      return join(home, '.config', 'fish', 'config.fish');
+    default:
+      return null;
+  }
+}
+
+/**
+ * Generate the alias line for a given shell
+ */
+export function generateAliasLine(shell: ShellType, aliasName: string, targetCommand: string): string {
+  if (shell === 'fish') {
+    return `${ALIAS_COMMENT}\nalias ${aliasName} '${targetCommand}'`;
+  }
+  return `${ALIAS_COMMENT}\nalias ${aliasName}='${targetCommand}'`;
+}
+
+/**
+ * Check if the parallel-cc alias is already installed in a profile file
+ */
+export function isAliasInstalled(profilePath: string, aliasName: string = 'claude'): boolean {
+  if (!existsSync(profilePath)) {
+    return false;
+  }
+
+  try {
+    const content = readFileSync(profilePath, 'utf-8');
+    // Check for our comment marker or the alias itself
+    const aliasPattern = new RegExp(`alias\\s+${aliasName}[=\\s].*claude-parallel`, 'i');
+    return content.includes(ALIAS_COMMENT) || aliasPattern.test(content);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Install the claude alias to the shell profile
+ */
+export function installAlias(options: InstallAliasOptions = {}): InstallAliasResult {
+  const {
+    aliasName = 'claude',
+    targetCommand = 'claude-parallel',
+    dryRun = false
+  } = options;
+
+  const shell = detectShell();
+  const profilePath = getShellProfilePath(shell);
+
+  const result: InstallAliasResult = {
+    success: false,
+    shell,
+    profilePath: profilePath ?? '',
+    alreadyInstalled: false
+  };
+
+  // Check if shell is supported
+  if (!profilePath) {
+    result.error = `Unsupported shell: ${shell}. Please add the alias manually.`;
+    return result;
+  }
+
+  result.profilePath = profilePath;
+
+  try {
+    // Check if already installed
+    if (isAliasInstalled(profilePath, aliasName)) {
+      result.success = true;
+      result.alreadyInstalled = true;
+      return result;
+    }
+
+    // Generate alias line
+    const aliasLine = generateAliasLine(shell, aliasName, targetCommand);
+
+    if (!dryRun) {
+      // Ensure directory exists for fish config
+      if (shell === 'fish') {
+        const fishConfigDir = dirname(profilePath);
+        if (!existsSync(fishConfigDir)) {
+          mkdirSync(fishConfigDir, { recursive: true });
+        }
+      }
+
+      // Read existing content
+      let content = '';
+      if (existsSync(profilePath)) {
+        content = readFileSync(profilePath, 'utf-8');
+      }
+
+      // Add newline if file doesn't end with one
+      const prefix = content.length > 0 && !content.endsWith('\n') ? '\n\n' : '\n';
+      const entry = `${prefix}${aliasLine}\n`;
+
+      appendFileSync(profilePath, entry, 'utf-8');
+    }
+
+    result.success = true;
+    return result;
+
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : 'Unknown error';
+    return result;
+  }
+}
+
+/**
+ * Uninstall the claude alias from the shell profile
+ */
+export function uninstallAlias(options: { aliasName?: string } = {}): InstallAliasResult {
+  const { aliasName = 'claude' } = options;
+
+  const shell = detectShell();
+  const profilePath = getShellProfilePath(shell);
+
+  const result: InstallAliasResult = {
+    success: false,
+    shell,
+    profilePath: profilePath ?? '',
+    alreadyInstalled: false
+  };
+
+  if (!profilePath || !existsSync(profilePath)) {
+    result.success = true; // Nothing to uninstall
+    return result;
+  }
+
+  result.profilePath = profilePath;
+
+  try {
+    let content = readFileSync(profilePath, 'utf-8');
+
+    // Remove our alias block (comment + alias line)
+    const lines = content.split('\n');
+    const newLines: string[] = [];
+    let skipNext = false;
+
+    for (const line of lines) {
+      if (line.trim() === ALIAS_COMMENT) {
+        skipNext = true; // Skip the comment and the next line (the alias)
+        continue;
+      }
+      if (skipNext) {
+        skipNext = false;
+        continue;
+      }
+      // Also remove standalone alias lines that match
+      const aliasPattern = new RegExp(`^\\s*alias\\s+${aliasName}[=\\s].*claude-parallel`);
+      if (aliasPattern.test(line)) {
+        continue;
+      }
+      newLines.push(line);
+    }
+
+    // Write back
+    writeFileSync(profilePath, newLines.join('\n'), 'utf-8');
+    result.success = true;
+    return result;
+
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : 'Unknown error';
+    return result;
+  }
+}
+
+/**
+ * Check the current alias installation status
+ */
+export function checkAliasStatus(aliasName: string = 'claude'): {
+  installed: boolean;
+  shell: ShellType;
+  profilePath: string | null;
+} {
+  const shell = detectShell();
+  const profilePath = getShellProfilePath(shell);
+
+  return {
+    installed: profilePath ? isAliasInstalled(profilePath, aliasName) : false,
+    shell,
+    profilePath
+  };
+}
+
+// ============================================================================
+// Combined Installation (v0.2.4)
+// ============================================================================
+
+export interface InstallAllOptions {
+  /** Install hooks globally */
+  hooks?: boolean;
+  /** Install hooks globally (shorthand for hooks + global) */
+  global?: boolean;
+  /** Install hooks locally */
+  local?: boolean;
+  /** Install shell alias */
+  alias?: boolean;
+  /** Add .claude/ to .gitignore */
+  gitignore?: boolean;
+  /** Repository path for local installation */
+  repoPath?: string;
+  /** Dry run - don't write files */
+  dryRun?: boolean;
+}
+
+export interface InstallAllResult {
+  success: boolean;
+  hooks?: InstallHooksResult;
+  alias?: InstallAliasResult;
+  errors: string[];
+}
+
+/**
+ * Install all parallel-cc configuration (hooks + alias)
+ * Equivalent to: parallel-cc install --hooks --global --alias
+ */
+export function installAll(options: InstallAllOptions = {}): InstallAllResult {
+  const {
+    hooks = true,
+    global: installGlobal = true,
+    local: installLocal = false,
+    alias = true,
+    gitignore = false,
+    repoPath = process.cwd(),
+    dryRun = false
+  } = options;
+
+  const result: InstallAllResult = {
+    success: true,
+    errors: []
+  };
+
+  // Install hooks
+  if (hooks) {
+    const hooksResult = installHooks({
+      global: installGlobal,
+      local: installLocal,
+      repoPath,
+      addToGitignore: gitignore,
+      dryRun
+    });
+    result.hooks = hooksResult;
+
+    if (!hooksResult.success) {
+      result.success = false;
+      result.errors.push(`Hooks installation failed: ${hooksResult.error}`);
+    }
+  }
+
+  // Install alias
+  if (alias) {
+    const aliasResult = installAlias({ dryRun });
+    result.alias = aliasResult;
+
+    if (!aliasResult.success) {
+      result.success = false;
+      result.errors.push(`Alias installation failed: ${aliasResult.error}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get combined installation status
+ */
+export function checkAllStatus(repoPath?: string): {
+  hooks: ReturnType<typeof checkHooksStatus>;
+  alias: ReturnType<typeof checkAliasStatus>;
+} {
+  return {
+    hooks: checkHooksStatus({ repoPath }),
+    alias: checkAliasStatus()
+  };
+}

@@ -14,13 +14,18 @@ import {
   installHooks,
   uninstallHooks,
   checkHooksStatus,
+  installAlias,
+  uninstallAlias,
+  checkAliasStatus,
+  installAll,
+  checkAllStatus,
   type InstallHooksOptions
 } from './hooks-installer.js';
 
 program
   .name('parallel-cc')
   .description('Coordinate parallel Claude Code sessions using git worktrees')
-  .version('0.2.1');
+  .version('0.2.4');
 
 /**
  * Helper to prompt user for input (for interactive mode)
@@ -287,132 +292,300 @@ program
   });
 
 /**
- * Install hooks for better session tracking
+ * Install hooks and configure shell alias
  */
 program
   .command('install')
-  .description('Configure parallel-cc hooks and settings')
+  .description('Configure parallel-cc hooks, alias, and settings')
   .option('--hooks', 'Install PostToolUse heartbeat hook for better session tracking')
-  .option('--global', 'Install to global settings (~/.claude/settings.json)')
-  .option('--local', 'Install to local settings (./.claude/settings.json)')
+  .option('--alias', 'Add claude=claude-parallel alias to shell profile')
+  .option('--all', 'Install everything (hooks globally + alias)')
+  .option('--interactive', 'Interactive mode - prompt for each option')
+  .option('--global', 'Install hooks to global settings (~/.claude/settings.json)')
+  .option('--local', 'Install hooks to local settings (./.claude/settings.json)')
   .option('--repo <path>', 'Repository path for local installation', process.cwd())
   .option('--gitignore', 'Add .claude/ to .gitignore (for --local)')
-  .option('--uninstall', 'Remove installed hooks instead of installing')
-  .option('--status', 'Check current hook installation status')
+  .option('--uninstall', 'Remove installed hooks/alias instead of installing')
+  .option('--status', 'Check current installation status')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     // Status check
     if (options.status) {
-      const status = checkHooksStatus({ repoPath: options.repo });
+      const status = checkAllStatus(options.repo);
 
       if (options.json) {
         console.log(JSON.stringify(status, null, 2));
       } else {
-        console.log(chalk.bold('\nHook Installation Status\n'));
+        console.log(chalk.bold('\nInstallation Status\n'));
 
-        const globalStatus = status.globalInstalled
+        // Hooks status
+        console.log(chalk.bold('  Hooks:'));
+        const globalStatus = status.hooks.globalInstalled
           ? chalk.green('✓ Installed')
           : chalk.dim('Not installed');
-        console.log(`  Global: ${globalStatus}`);
-        console.log(chalk.dim(`    Path: ${status.globalPath}`));
+        console.log(`    Global: ${globalStatus}`);
+        console.log(chalk.dim(`      Path: ${status.hooks.globalPath}`));
 
-        const localStatus = status.localInstalled
+        const localStatus = status.hooks.localInstalled
           ? chalk.green('✓ Installed')
           : chalk.dim('Not installed');
-        console.log(`  Local:  ${localStatus}`);
-        console.log(chalk.dim(`    Path: ${status.localPath}`));
+        console.log(`    Local:  ${localStatus}`);
+        console.log(chalk.dim(`      Path: ${status.hooks.localPath}`));
+
+        // Alias status
+        console.log(chalk.bold('\n  Alias:'));
+        const aliasStatus = status.alias.installed
+          ? chalk.green('✓ Installed')
+          : chalk.dim('Not installed');
+        console.log(`    Status: ${aliasStatus}`);
+        console.log(chalk.dim(`    Shell:  ${status.alias.shell}`));
+        if (status.alias.profilePath) {
+          console.log(chalk.dim(`    Path:   ${status.alias.profilePath}`));
+        }
         console.log('');
       }
       return;
     }
 
-    // Must specify --hooks for install/uninstall
-    if (!options.hooks) {
-      console.log(chalk.yellow('No action specified. Use --hooks to install heartbeat hooks.'));
-      console.log('');
-      console.log('Examples:');
-      console.log('  parallel-cc install --hooks           # Interactive mode');
-      console.log('  parallel-cc install --hooks --global  # Install globally');
-      console.log('  parallel-cc install --hooks --local   # Install locally');
-      console.log('  parallel-cc install --status          # Check status');
-      console.log('');
-      return;
-    }
+    // --all mode: install hooks globally + alias
+    if (options.all) {
+      console.log(chalk.bold('\nInstalling all parallel-cc configuration...\n'));
 
-    // Uninstall mode
-    if (options.uninstall) {
-      const result = uninstallHooks({
-        global: options.global,
-        local: options.local,
-        repoPath: options.repo
+      const result = installAll({
+        hooks: true,
+        global: true,
+        alias: true,
+        dryRun: false
       });
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
-      } else if (result.success) {
-        console.log(chalk.green('✓ Hooks uninstalled'));
-        console.log(chalk.dim(`  From: ${result.settingsPath}`));
       } else {
-        console.error(chalk.red(`✗ Uninstall failed: ${result.error}`));
+        // Report hooks result
+        if (result.hooks) {
+          if (result.hooks.alreadyInstalled) {
+            console.log(chalk.green('✓ Hooks already installed'));
+          } else if (result.hooks.success) {
+            console.log(chalk.green('✓ Hooks installed globally'));
+          } else {
+            console.log(chalk.red(`✗ Hooks failed: ${result.hooks.error}`));
+          }
+          console.log(chalk.dim(`  Path: ${result.hooks.settingsPath}`));
+        }
+
+        // Report alias result
+        if (result.alias) {
+          if (result.alias.alreadyInstalled) {
+            console.log(chalk.green('✓ Alias already installed'));
+          } else if (result.alias.success) {
+            console.log(chalk.green('✓ Alias installed'));
+            console.log(chalk.dim(`  Shell: ${result.alias.shell}`));
+            console.log(chalk.dim(`  Path: ${result.alias.profilePath}`));
+            console.log(chalk.yellow('\n  Restart your shell or run: source ' + result.alias.profilePath));
+          } else {
+            console.log(chalk.red(`✗ Alias failed: ${result.alias.error}`));
+          }
+        }
+
+        if (!result.success) {
+          process.exit(1);
+        }
+      }
+      return;
+    }
+
+    // --interactive mode: prompt for each option
+    if (options.interactive) {
+      console.log(chalk.bold('\nInteractive Installation\n'));
+
+      // Prompt for hooks
+      const hooksAnswer = await prompt('Install heartbeat hooks? [y/N]: ');
+      const wantHooks = hooksAnswer === 'y' || hooksAnswer === 'yes';
+
+      let hooksGlobal = false;
+      let hooksLocal = false;
+      if (wantHooks) {
+        const locationAnswer = await prompt('  Install globally or locally? [global/local]: ');
+        if (locationAnswer === 'global' || locationAnswer === 'g') {
+          hooksGlobal = true;
+        } else if (locationAnswer === 'local' || locationAnswer === 'l') {
+          hooksLocal = true;
+        }
+      }
+
+      // Prompt for alias
+      const aliasAnswer = await prompt('Add claude=claude-parallel alias? [y/N]: ');
+      const wantAlias = aliasAnswer === 'y' || aliasAnswer === 'yes';
+
+      // Execute installations
+      console.log('');
+
+      if (wantHooks && (hooksGlobal || hooksLocal)) {
+        const hooksResult = installHooks({
+          global: hooksGlobal,
+          local: hooksLocal,
+          repoPath: options.repo
+        });
+
+        if (hooksResult.success) {
+          if (hooksResult.alreadyInstalled) {
+            console.log(chalk.green('✓ Hooks already installed'));
+          } else {
+            console.log(chalk.green('✓ Hooks installed'));
+          }
+          console.log(chalk.dim(`  Path: ${hooksResult.settingsPath}`));
+        } else {
+          console.log(chalk.red(`✗ Hooks failed: ${hooksResult.error}`));
+        }
+      }
+
+      if (wantAlias) {
+        const aliasResult = installAlias();
+
+        if (aliasResult.success) {
+          if (aliasResult.alreadyInstalled) {
+            console.log(chalk.green('✓ Alias already installed'));
+          } else {
+            console.log(chalk.green('✓ Alias installed'));
+            console.log(chalk.dim(`  Path: ${aliasResult.profilePath}`));
+            console.log(chalk.yellow('  Restart your shell or run: source ' + aliasResult.profilePath));
+          }
+        } else {
+          console.log(chalk.red(`✗ Alias failed: ${aliasResult.error}`));
+        }
+      }
+
+      console.log('');
+      return;
+    }
+
+    // Handle --alias flag
+    if (options.alias) {
+      if (options.uninstall) {
+        const result = uninstallAlias();
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else if (result.success) {
+          console.log(chalk.green('✓ Alias removed'));
+          console.log(chalk.dim(`  From: ${result.profilePath}`));
+        } else {
+          console.error(chalk.red(`✗ Uninstall failed: ${result.error}`));
+          process.exit(1);
+        }
+        return;
+      }
+
+      const result = installAlias();
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.success) {
+        if (result.alreadyInstalled) {
+          console.log(chalk.green('✓ Alias already installed'));
+        } else {
+          console.log(chalk.green('✓ Alias installed'));
+          console.log(chalk.dim(`  Shell: ${result.shell}`));
+          console.log(chalk.dim(`  Path: ${result.profilePath}`));
+          console.log(chalk.yellow('\nRestart your shell or run: source ' + result.profilePath));
+        }
+      } else {
+        console.error(chalk.red(`✗ Installation failed: ${result.error}`));
         process.exit(1);
       }
       return;
     }
 
-    // Interactive mode - prompt for global vs local
-    let installGlobal = options.global;
-    let installLocal = options.local;
+    // Handle --hooks flag
+    if (options.hooks) {
+      // Uninstall mode
+      if (options.uninstall) {
+        const result = uninstallHooks({
+          global: options.global,
+          local: options.local,
+          repoPath: options.repo
+        });
 
-    if (!installGlobal && !installLocal) {
-      // Interactive mode
-      console.log(chalk.bold('\nInstall Heartbeat Hook\n'));
-      console.log('The heartbeat hook improves session tracking by updating');
-      console.log('timestamps each time Claude Code uses a tool.\n');
-
-      const answer = await prompt('Install globally or locally? [global/local/skip]: ');
-
-      if (answer === 'global' || answer === 'g') {
-        installGlobal = true;
-      } else if (answer === 'local' || answer === 'l') {
-        installLocal = true;
-      } else if (answer === 'skip' || answer === 's' || answer === '') {
-        console.log(chalk.yellow('Skipped hook installation.'));
-        return;
-      } else {
-        console.log(chalk.yellow(`Unknown option: ${answer}. Skipping.`));
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else if (result.success) {
+          console.log(chalk.green('✓ Hooks uninstalled'));
+          console.log(chalk.dim(`  From: ${result.settingsPath}`));
+        } else {
+          console.error(chalk.red(`✗ Uninstall failed: ${result.error}`));
+          process.exit(1);
+        }
         return;
       }
-    }
 
-    // Install hooks
-    const installOptions: InstallHooksOptions = {
-      global: installGlobal,
-      local: installLocal,
-      repoPath: options.repo,
-      addToGitignore: options.gitignore && installLocal
-    };
+      // Interactive mode - prompt for global vs local
+      let installGlobal = options.global;
+      let installLocal = options.local;
 
-    const result = installHooks(installOptions);
+      if (!installGlobal && !installLocal) {
+        // Interactive mode
+        console.log(chalk.bold('\nInstall Heartbeat Hook\n'));
+        console.log('The heartbeat hook improves session tracking by updating');
+        console.log('timestamps each time Claude Code uses a tool.\n');
 
-    if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else if (result.success) {
-      if (result.alreadyInstalled) {
-        console.log(chalk.green('✓ Hooks already installed'));
-      } else if (result.created) {
-        console.log(chalk.green('✓ Hooks installed (created new settings file)'));
+        const answer = await prompt('Install globally or locally? [global/local/skip]: ');
+
+        if (answer === 'global' || answer === 'g') {
+          installGlobal = true;
+        } else if (answer === 'local' || answer === 'l') {
+          installLocal = true;
+        } else if (answer === 'skip' || answer === 's' || answer === '') {
+          console.log(chalk.yellow('Skipped hook installation.'));
+          return;
+        } else {
+          console.log(chalk.yellow(`Unknown option: ${answer}. Skipping.`));
+          return;
+        }
+      }
+
+      // Install hooks
+      const installOptions: InstallHooksOptions = {
+        global: installGlobal,
+        local: installLocal,
+        repoPath: options.repo,
+        addToGitignore: options.gitignore && installLocal
+      };
+
+      const result = installHooks(installOptions);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.success) {
+        if (result.alreadyInstalled) {
+          console.log(chalk.green('✓ Hooks already installed'));
+        } else if (result.created) {
+          console.log(chalk.green('✓ Hooks installed (created new settings file)'));
+        } else {
+          console.log(chalk.green('✓ Hooks installed (merged with existing settings)'));
+        }
+        console.log(chalk.dim(`  Path: ${result.settingsPath}`));
+
+        if (result.gitignoreUpdated) {
+          console.log(chalk.dim('  Added .claude/ to .gitignore'));
+        }
       } else {
-        console.log(chalk.green('✓ Hooks installed (merged with existing settings)'));
+        console.error(chalk.red(`✗ Installation failed: ${result.error}`));
+        process.exit(1);
       }
-      console.log(chalk.dim(`  Path: ${result.settingsPath}`));
-
-      if (result.gitignoreUpdated) {
-        console.log(chalk.dim('  Added .claude/ to .gitignore'));
-      }
-    } else {
-      console.error(chalk.red(`✗ Installation failed: ${result.error}`));
-      process.exit(1);
+      return;
     }
+
+    // No specific action specified - show help
+    console.log(chalk.yellow('No action specified.'));
+    console.log('');
+    console.log('Examples:');
+    console.log('  parallel-cc install --all             # Install hooks + alias');
+    console.log('  parallel-cc install --interactive     # Prompted installation');
+    console.log('  parallel-cc install --hooks           # Install hooks (interactive)');
+    console.log('  parallel-cc install --hooks --global  # Install hooks globally');
+    console.log('  parallel-cc install --alias           # Install shell alias');
+    console.log('  parallel-cc install --status          # Check status');
+    console.log('');
   });
 
 // Parse and execute

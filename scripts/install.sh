@@ -354,6 +354,49 @@ install_hooks() {
 # Offer to install hooks
 install_hooks
 
+# Interactive alias setup
+install_alias() {
+    # Check if running interactively
+    if [ -t 0 ]; then
+        echo ""
+        print step "Setting up the 'claude' alias makes parallel-cc automatic:"
+        print step "  Instead of: claude-parallel"
+        print step "  Just run:   claude"
+        echo ""
+
+        read -p "Add 'claude=claude-parallel' alias to your shell profile? [y/N]: " alias_answer
+        case "$alias_answer" in
+            [Yy]|[Yy][Ee][Ss])
+                print step "Installing alias..."
+                if "$CLI_TARGET" install --alias > /tmp/parallel-cc-alias.log 2>&1; then
+                    print check "Alias installed successfully"
+                    # Extract the profile path from the output
+                    PROFILE_PATH=$(grep -o "Path:.*" /tmp/parallel-cc-alias.log | cut -d' ' -f2 || echo "your shell profile")
+                    print step "Location: $PROFILE_PATH"
+                    print warning "Restart your shell or run: source $PROFILE_PATH"
+                else
+                    print warning "Alias installation failed. Check /tmp/parallel-cc-alias.log"
+                    cat /tmp/parallel-cc-alias.log
+                    print step "You can add the alias manually to your shell profile:"
+                    print step "  alias claude='claude-parallel'"
+                fi
+                ;;
+            *)
+                print step "Skipped alias installation."
+                print step "You can install later with: parallel-cc install --alias"
+                ;;
+        esac
+    else
+        # Non-interactive mode
+        print step "Non-interactive mode. Skipping alias setup."
+        print step "To install alias later, run: parallel-cc install --alias"
+    fi
+    echo ""
+}
+
+# Offer to install alias
+install_alias
+
 # Detect shell and provide specific instructions
 SHELL_NAME=$(basename "$SHELL")
 SHELL_RC=""

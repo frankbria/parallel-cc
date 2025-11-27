@@ -19,7 +19,19 @@ import {
   installHooks,
   uninstallHooks,
   checkHooksStatus,
-  type ClaudeSettings
+  // Alias installer functions (v0.2.3)
+  detectShell,
+  getShellProfilePath,
+  generateAliasLine,
+  isAliasInstalled,
+  installAlias,
+  uninstallAlias,
+  checkAliasStatus,
+  // Combined installation (v0.2.4)
+  installAll,
+  checkAllStatus,
+  type ClaudeSettings,
+  type ShellType
 } from '../src/hooks-installer.js';
 
 // Test fixtures directory
@@ -494,6 +506,334 @@ describe('hooks-installer', () => {
       expect(status.globalPath).toContain('.claude');
       expect(status.globalPath).toContain('settings.json');
       expect(status.localPath).toBe(LOCAL_SETTINGS_PATH);
+    });
+  });
+
+  // ============================================================================
+  // Alias Installer Tests (v0.2.3)
+  // ============================================================================
+
+  describe('detectShell', () => {
+    const originalShell = process.env.SHELL;
+
+    afterEach(() => {
+      if (originalShell !== undefined) {
+        process.env.SHELL = originalShell;
+      } else {
+        delete process.env.SHELL;
+      }
+    });
+
+    it('should detect bash', () => {
+      process.env.SHELL = '/bin/bash';
+      expect(detectShell()).toBe('bash');
+    });
+
+    it('should detect zsh', () => {
+      process.env.SHELL = '/usr/bin/zsh';
+      expect(detectShell()).toBe('zsh');
+    });
+
+    it('should detect fish', () => {
+      process.env.SHELL = '/usr/local/bin/fish';
+      expect(detectShell()).toBe('fish');
+    });
+
+    it('should return unknown for unsupported shell', () => {
+      process.env.SHELL = '/bin/tcsh';
+      expect(detectShell()).toBe('unknown');
+    });
+
+    it('should return unknown for empty SHELL', () => {
+      process.env.SHELL = '';
+      expect(detectShell()).toBe('unknown');
+    });
+
+    it('should return unknown for undefined SHELL', () => {
+      delete process.env.SHELL;
+      expect(detectShell()).toBe('unknown');
+    });
+  });
+
+  describe('getShellProfilePath', () => {
+    it('should return null for unknown shell', () => {
+      expect(getShellProfilePath('unknown')).toBeNull();
+    });
+
+    it('should return .zshrc path for zsh', () => {
+      const result = getShellProfilePath('zsh');
+      expect(result).toContain('.zshrc');
+      expect(result?.startsWith(os.homedir())).toBe(true);
+    });
+
+    it('should return config.fish path for fish', () => {
+      const result = getShellProfilePath('fish');
+      expect(result).toContain('.config');
+      expect(result).toContain('fish');
+      expect(result).toContain('config.fish');
+    });
+
+    it('should return a bash profile path for bash', () => {
+      const result = getShellProfilePath('bash');
+      expect(result).not.toBeNull();
+      expect(result?.startsWith(os.homedir())).toBe(true);
+      // Should be either .bashrc or .bash_profile
+      expect(result?.includes('.bash')).toBe(true);
+    });
+  });
+
+  describe('generateAliasLine', () => {
+    it('should generate bash alias format', () => {
+      const result = generateAliasLine('bash', 'claude', 'claude-parallel');
+      expect(result).toContain("alias claude='claude-parallel'");
+      expect(result).toContain('# parallel-cc');
+    });
+
+    it('should generate zsh alias format', () => {
+      const result = generateAliasLine('zsh', 'claude', 'claude-parallel');
+      expect(result).toContain("alias claude='claude-parallel'");
+    });
+
+    it('should generate fish alias format with space', () => {
+      const result = generateAliasLine('fish', 'claude', 'claude-parallel');
+      expect(result).toContain("alias claude 'claude-parallel'");
+    });
+
+    it('should support custom alias names', () => {
+      const result = generateAliasLine('bash', 'cc', 'claude-parallel');
+      expect(result).toContain("alias cc='claude-parallel'");
+    });
+  });
+
+  describe('isAliasInstalled', () => {
+    const testProfilePath = path.join(TEST_DIR, '.bashrc');
+
+    it('should return false for non-existent profile', () => {
+      expect(isAliasInstalled('/non/existent/path')).toBe(false);
+    });
+
+    it('should return false when alias not present', () => {
+      fs.writeFileSync(testProfilePath, 'export PATH="$HOME/bin:$PATH"\n');
+      expect(isAliasInstalled(testProfilePath)).toBe(false);
+    });
+
+    it('should return true when comment marker present', () => {
+      fs.writeFileSync(testProfilePath, '# parallel-cc: alias for claude-parallel wrapper\nalias claude=\'claude-parallel\'\n');
+      expect(isAliasInstalled(testProfilePath)).toBe(true);
+    });
+
+    it('should return true when alias pattern matches', () => {
+      fs.writeFileSync(testProfilePath, "alias claude='claude-parallel'\n");
+      expect(isAliasInstalled(testProfilePath)).toBe(true);
+    });
+
+    it('should detect alias with different name', () => {
+      fs.writeFileSync(testProfilePath, "alias cc='claude-parallel'\n");
+      expect(isAliasInstalled(testProfilePath, 'cc')).toBe(true);
+    });
+
+    it('should not match unrelated aliases', () => {
+      fs.writeFileSync(testProfilePath, "alias ll='ls -la'\n");
+      expect(isAliasInstalled(testProfilePath, 'claude')).toBe(false);
+    });
+  });
+
+  describe('installAlias', () => {
+    const originalShell = process.env.SHELL;
+    let testProfilePath: string;
+
+    beforeEach(() => {
+      // Set up for bash shell
+      process.env.SHELL = '/bin/bash';
+      testProfilePath = path.join(TEST_DIR, '.bashrc');
+    });
+
+    afterEach(() => {
+      if (originalShell !== undefined) {
+        process.env.SHELL = originalShell;
+      } else {
+        delete process.env.SHELL;
+      }
+    });
+
+    it('should fail for unsupported shell', () => {
+      process.env.SHELL = '/bin/tcsh';
+      const result = installAlias();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unsupported shell');
+    });
+
+    it('should check if already installed (uses real profile)', () => {
+      // Note: This test uses the actual shell profile path, not the test directory
+      // We can only verify the function runs without error and returns expected structure
+      const result = installAlias({ dryRun: true });
+      expect(result.success).toBe(true);
+      // alreadyInstalled may be true or false depending on real profile state
+      expect(typeof result.alreadyInstalled).toBe('boolean');
+    });
+
+    it('should not write in dry run mode', () => {
+      const result = installAlias({ dryRun: true });
+      expect(result.success).toBe(true);
+      // File should not exist since we're in TEST_DIR, not real home
+      // This tests the logic path, actual write depends on where the profile is
+    });
+
+    it('should report shell type', () => {
+      const result = installAlias({ dryRun: true });
+      expect(result.shell).toBe('bash');
+    });
+  });
+
+  describe('uninstallAlias', () => {
+    const originalShell = process.env.SHELL;
+    let testProfilePath: string;
+
+    beforeEach(() => {
+      process.env.SHELL = '/bin/bash';
+      testProfilePath = path.join(TEST_DIR, '.bashrc');
+    });
+
+    afterEach(() => {
+      if (originalShell !== undefined) {
+        process.env.SHELL = originalShell;
+      } else {
+        delete process.env.SHELL;
+      }
+    });
+
+    it('should succeed when profile does not exist', () => {
+      process.env.SHELL = '/bin/bash';
+      const result = uninstallAlias();
+      expect(result.success).toBe(true);
+    });
+
+    it('should succeed for unsupported shell', () => {
+      process.env.SHELL = '/bin/tcsh';
+      const result = uninstallAlias();
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('checkAliasStatus', () => {
+    const originalShell = process.env.SHELL;
+
+    afterEach(() => {
+      if (originalShell !== undefined) {
+        process.env.SHELL = originalShell;
+      } else {
+        delete process.env.SHELL;
+      }
+    });
+
+    it('should report shell type', () => {
+      process.env.SHELL = '/bin/zsh';
+      const status = checkAliasStatus();
+      expect(status.shell).toBe('zsh');
+    });
+
+    it('should report not installed when profile missing', () => {
+      process.env.SHELL = '/bin/bash';
+      const status = checkAliasStatus();
+      // Depends on whether .bashrc exists in home - just check structure
+      expect(typeof status.installed).toBe('boolean');
+      expect(status.profilePath).not.toBeNull();
+    });
+
+    it('should return null profilePath for unknown shell', () => {
+      process.env.SHELL = '/bin/tcsh';
+      const status = checkAliasStatus();
+      expect(status.profilePath).toBeNull();
+      expect(status.installed).toBe(false);
+    });
+  });
+
+  // ============================================================================
+  // Combined Installation Tests (v0.2.4)
+  // ============================================================================
+
+  describe('installAll', () => {
+    const originalShell = process.env.SHELL;
+
+    beforeEach(() => {
+      process.env.SHELL = '/bin/bash';
+    });
+
+    afterEach(() => {
+      if (originalShell !== undefined) {
+        process.env.SHELL = originalShell;
+      } else {
+        delete process.env.SHELL;
+      }
+    });
+
+    it('should install hooks locally with dryRun', () => {
+      const result = installAll({
+        hooks: true,
+        global: false,
+        local: true,
+        alias: false,
+        repoPath: LOCAL_REPO_PATH,
+        dryRun: true
+      });
+
+      expect(result.hooks).toBeDefined();
+      expect(result.hooks?.success).toBe(true);
+      expect(result.alias).toBeUndefined();
+    });
+
+    it('should install both hooks and alias', () => {
+      const result = installAll({
+        hooks: true,
+        local: true,
+        global: false,
+        alias: true,
+        repoPath: LOCAL_REPO_PATH,
+        dryRun: true
+      });
+
+      expect(result.hooks).toBeDefined();
+      expect(result.alias).toBeDefined();
+    });
+
+    it('should track errors', () => {
+      process.env.SHELL = '/bin/tcsh'; // Unsupported shell
+      const result = installAll({
+        hooks: false,
+        alias: true
+      });
+
+      // Alias should fail for unsupported shell
+      expect(result.success).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('should default to hooks=true and alias=true', () => {
+      const result = installAll({ dryRun: true });
+
+      expect(result.hooks).toBeDefined();
+      expect(result.alias).toBeDefined();
+    });
+  });
+
+  describe('checkAllStatus', () => {
+    it('should return hooks and alias status', () => {
+      const status = checkAllStatus(LOCAL_REPO_PATH);
+
+      expect(status.hooks).toBeDefined();
+      expect(status.hooks.globalPath).toContain('.claude');
+      expect(status.hooks.localPath).toBe(LOCAL_SETTINGS_PATH);
+
+      expect(status.alias).toBeDefined();
+      expect(typeof status.alias.installed).toBe('boolean');
+      expect(status.alias.shell).toBeDefined();
+    });
+
+    it('should use cwd when no repoPath provided', () => {
+      const status = checkAllStatus();
+
+      expect(status.hooks).toBeDefined();
+      expect(status.alias).toBeDefined();
     });
   });
 });

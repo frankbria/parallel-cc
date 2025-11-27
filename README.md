@@ -1,6 +1,6 @@
 # parallel-cc
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-0.2.4-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -112,21 +112,22 @@ alias claude='claude-parallel'
 
 Now every time you run `claude`, it automatically handles parallel coordination!
 
-### Optional: Add heartbeat hook
+### Optional: Complete Setup with One Command
 
-For better stale session detection, install the heartbeat hook using the CLI:
+For the best experience, run the full installation which sets up both the heartbeat hook and shell alias:
 
 ```bash
-# Interactive mode - prompts for global vs local
-parallel-cc install --hooks
+# Full installation (recommended)
+parallel-cc install --all
 
-# Install globally (affects all repos)
-parallel-cc install --hooks --global
+# Or step-by-step:
+parallel-cc install --hooks --global  # Heartbeat hook
+parallel-cc install --alias           # Shell alias
 
-# Install locally (current repo only)
-parallel-cc install --hooks --local
+# Interactive mode - prompts for each option
+parallel-cc install --interactive
 
-# Check hook installation status
+# Check installation status
 parallel-cc install --status
 ```
 
@@ -179,11 +180,21 @@ parallel-cc status
 parallel-cc status --repo /path/to/repo
 parallel-cc status --json
 
-# Install/manage heartbeat hooks
+# Full installation (hooks + alias)
+parallel-cc install --all                # Install everything
+parallel-cc install --interactive        # Prompted installation
+
+# Heartbeat hooks
 parallel-cc install --hooks              # Interactive mode
 parallel-cc install --hooks --global     # Install globally
 parallel-cc install --hooks --local      # Install locally
-parallel-cc install --status             # Check hook status
+
+# Shell alias
+parallel-cc install --alias              # Add claude=claude-parallel alias
+parallel-cc install --alias --uninstall  # Remove alias
+
+# Check installation status
+parallel-cc install --status
 
 # Manual registration (usually done by wrapper)
 parallel-cc register --repo /path/to/repo --pid $$
@@ -239,10 +250,10 @@ git merge <worktree-branch-name>
 **Completed:**
 - [x] **v0.1** - Project foundation (structure, types, schema)
 - [x] **v0.2** - Core infrastructure (CLI + SQLite + wrapper script)
-- [x] **v0.2.1** - Hook installation & configuration ← *Current*
+- [x] **v0.2.1** - Hook installation & configuration
+- [x] **v0.2.4** - Shell alias setup & full installation command ← *Current*
 
 **Planned:**
-- [ ] **v0.2.3-v0.2.4** - Additional installation enhancements (aliases, full setup)
 - [ ] **v0.3** - MCP server for status queries + >85% test coverage
 - [ ] **v0.4** - Branch merge detection & rebase assistance
 - [ ] **v0.5** - File-level conflict detection
