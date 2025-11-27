@@ -31,7 +31,7 @@ src/
 ├── cli.ts         # Commander-based CLI entry point
 ├── coordinator.ts # Core logic - session management
 ├── db.ts          # SQLite operations via better-sqlite3
-├── gtr.ts         # Wrapper for gtr CLI commands
+├── gtr.ts         # Wrapper for gtr CLI commands (supports v1.x and v2.x)
 └── types.ts       # TypeScript type definitions
 
 scripts/
@@ -44,7 +44,7 @@ scripts/
 
 1. **Wrapper Script** - `claude-parallel` wraps the `claude` command, handling registration before launch
 2. **Sessions** - Each Claude Code process is tracked in SQLite by PID
-3. **Worktrees** - Parallel sessions get isolated git worktrees via `gtr`
+3. **Worktrees** - Parallel sessions get isolated git worktrees via `gtr` (v1.x or v2.x auto-detected)
 4. **Heartbeats** - Optional PostToolUse hook updates timestamps for stale detection
 5. **Auto-cleanup** - Dead sessions and their worktrees are cleaned up automatically
 

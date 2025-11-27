@@ -130,12 +130,16 @@ fi
 print check "jq $(jq --version)"
 
 # Check for gtr (required for worktree management)
-if ! command -v gtr &> /dev/null; then
+# Support both v1.x (standalone 'gtr') and v2.x ('git gtr')
+if command -v gtr &> /dev/null; then
+    print check "gtr installed (v1.x standalone)"
+elif git gtr version &> /dev/null 2>&1; then
+    print check "git gtr installed (v2.x subcommand)"
+else
     print error "gtr (git-worktree-runner) is required but not installed."
     print step "Install from: https://github.com/coderabbitai/git-worktree-runner"
     exit 1
 fi
-print check "gtr installed"
 
 # Check write permissions
 if [ ! -w "$(dirname "$INSTALL_DIR")" ] && [ ! -w "$INSTALL_DIR" 2>/dev/null ]; then

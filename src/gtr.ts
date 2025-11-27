@@ -8,17 +8,45 @@ import type { GtrResult, GtrListEntry } from './types.js';
 
 export class GtrWrapper {
   private repoPath: string;
-  
+  private static gtrCommand: string | null = null;
+
   constructor(repoPath: string) {
     this.repoPath = repoPath;
   }
-  
+
+  /**
+   * Detect which gtr command to use (v1.x 'gtr' or v2.x 'git gtr')
+   */
+  private static detectGtrCommand(): string {
+    if (this.gtrCommand) {
+      return this.gtrCommand;
+    }
+
+    // Try v1.x standalone command first
+    try {
+      execSync('gtr version', { stdio: 'pipe' });
+      this.gtrCommand = 'gtr';
+      logger.debug('Using gtr v1.x (standalone command)');
+      return this.gtrCommand;
+    } catch {
+      // Try v2.x git subcommand
+      try {
+        execSync('git gtr version', { stdio: 'pipe' });
+        this.gtrCommand = 'git gtr';
+        logger.debug('Using gtr v2.x (git subcommand)');
+        return this.gtrCommand;
+      } catch {
+        throw new Error('gtr is not installed or not available in PATH');
+      }
+    }
+  }
+
   /**
    * Check if gtr is installed and available
    */
   static isAvailable(): boolean {
     try {
-      execSync('gtr version', { stdio: 'pipe' });
+      this.detectGtrCommand();
       return true;
     } catch (error) {
       logger.debug('gtr not available', error);
@@ -31,16 +59,17 @@ export class GtrWrapper {
    */
   createWorktree(name: string, fromRef: string = 'HEAD'): GtrResult {
     try {
+      const cmd = GtrWrapper.detectGtrCommand();
       const output = execSync(
-        `gtr new ${name} --from ${fromRef} --yes`,
+        `${cmd} new ${name} --from ${fromRef} --yes`,
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
       return { success: true, output: output.trim() };
     } catch (err: any) {
-      return { 
-        success: false, 
-        output: '', 
-        error: err.stderr?.toString() || err.message 
+      return {
+        success: false,
+        output: '',
+        error: err.stderr?.toString() || err.message
       };
     }
   }
@@ -50,8 +79,9 @@ export class GtrWrapper {
    */
   getWorktreePath(name: string): string | null {
     try {
+      const cmd = GtrWrapper.detectGtrCommand();
       const output = execSync(
-        `gtr go ${name}`,
+        `${cmd} go ${name}`,
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
       return output.trim();
@@ -66,17 +96,18 @@ export class GtrWrapper {
    */
   removeWorktree(name: string, deleteBranch: boolean = false): GtrResult {
     try {
+      const cmd = GtrWrapper.detectGtrCommand();
       const flags = deleteBranch ? '--delete-branch --yes' : '--yes';
       const output = execSync(
-        `gtr rm ${name} ${flags}`,
+        `${cmd} rm ${name} ${flags}`,
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
       return { success: true, output: output.trim() };
     } catch (err: any) {
-      return { 
-        success: false, 
-        output: '', 
-        error: err.stderr?.toString() || err.message 
+      return {
+        success: false,
+        output: '',
+        error: err.stderr?.toString() || err.message
       };
     }
   }
@@ -86,8 +117,9 @@ export class GtrWrapper {
    */
   listWorktrees(): GtrListEntry[] {
     try {
+      const cmd = GtrWrapper.detectGtrCommand();
       const output = execSync(
-        'gtr list --porcelain',
+        `${cmd} list --porcelain`,
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
       

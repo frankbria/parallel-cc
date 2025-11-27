@@ -236,6 +236,12 @@ export PATH="$HOME/.local/bin:$PATH"
 
 Install gtr from https://github.com/coderabbitai/git-worktree-runner
 
+**Note:** `parallel-cc` supports both:
+- gtr v1.x (standalone `gtr` command)
+- gtr v2.x (`git gtr` subcommand)
+
+The tool auto-detects which version you have installed.
+
 ### Sessions not cleaning up
 
 Run manual cleanup:
