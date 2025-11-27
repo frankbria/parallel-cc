@@ -292,6 +292,15 @@ program
     console.log(chalk.dim(`  Auto-cleanup: ${DEFAULT_CONFIG.autoCleanupWorktrees}`));
     console.log(chalk.dim(`  Worktree prefix: ${DEFAULT_CONFIG.worktreePrefix}`));
 
+    // Check MCP configuration (informational)
+    const mcpStatus = checkMcpStatus();
+    if (mcpStatus.installed) {
+      console.log(chalk.dim(`  MCP Server: configured`));
+    } else {
+      console.log(chalk.dim(`  MCP Server: not configured`));
+      console.log(chalk.dim(`    Run: parallel-cc install --mcp`));
+    }
+
     console.log('');
   });
 
