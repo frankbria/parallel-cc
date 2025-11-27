@@ -4,6 +4,225 @@
 
 - **v0.1** - Project structure, types, schema design ✅
 - **v0.2** - CLI + SQLite + wrapper script ✅ (current)
+- **v0.3** - MCP Server for Status Queries (planned)
+- **v0.4** - Branch Merge Detection & Rebase Assistance (planned)
+- **v0.5** - File-Level Conflict Detection (planned)
+- **v1.0** - E2B Sandbox Integration for Autonomous Execution (major milestone)
+
+---
+
+## v1.0 - E2B Sandbox Integration 🚀
+
+### Overview
+**Game-changing feature:** Enable truly autonomous, long-running Claude Code execution in isolated E2B cloud sandboxes. This transforms parallel-cc from a worktree coordinator into a full autonomous development platform.
+
+**Why this is v1.0:** This feature unlocks the "plan → execute → review" workflow that makes Claude Code genuinely autonomous for complex, multi-hour tasks while maintaining safety through worktree isolation.
+
+### Core Workflow
+```bash
+# Step 1: Plan interactively (local Claude)
+$ claude
+> "Help me plan an auth refactor with comprehensive tests"
+[Claude creates PLAN.md or .apm/Implementation_Plan.md]
+$ git commit PLAN.md -m "plan: auth refactor"
+
+# Step 2: Execute autonomously (E2B sandbox)
+$ parallel-cc sandbox-run --repo . --prompt "Execute PLAN.md with TDD approach"
+# Walk away for coffee - Claude works for 30+ minutes uninterrupted
+# Sandbox automatically runs with --dangerously-skip-permissions
+
+# Step 3: Review & merge (local)
+$ cd parallel-e2b-abc123  # worktree with results
+$ git diff main  # review all changes
+$ pytest tests/  # verify locally
+$ git push origin HEAD:feature/auth
+```
+
+### Key Features
+
+#### Hybrid Execution Model
+- **Mode 1 (Local)**: Current worktree coordination for interactive development
+- **Mode 2 (E2B Sandbox)**: Cloud-isolated autonomous execution with full permissions
+- Both modes tracked in same SQLite database with unified session management
+
+#### Autonomous Execution
+- Sandbox runs Claude Code with `--dangerously-skip-permissions` by design
+- Safe because sandbox is isolated VM with no access to your system
+- Supports 1-hour max execution time (E2B free tier limit)
+- Real-time output streaming for monitoring progress
+- Automatic warnings at 30min and 50min marks
+
+#### Intelligent File Sync
+- **Upload**: Compress and upload worktree excluding `.gitignore` patterns
+- **Download**: Selective download of only changed files
+- **Git Integration**: parallel-cc handles all git commits after execution
+- Respects `.gitignore` to skip `node_modules`, build artifacts, etc.
+
+#### Plan-Driven Execution
+- Reads committed `PLAN.md` or `.apm/Implementation_Plan.md` from repo
+- Claude autonomously follows multi-phase plans step-by-step
+- Supports TDD workflows: write tests → run tests → implement → verify
+- Optional `--prompt-file` flag to execute specific plan files
+
+### New CLI Commands
+
+```bash
+# Execute autonomous task in sandbox
+parallel-cc sandbox-run --repo . --prompt "Implement feature X"
+parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+parallel-cc sandbox-run --repo . --prompt-file .apm/Implementation_Plan.md
+
+# Monitor active sandbox sessions  
+parallel-cc status --sandbox-only
+parallel-cc sandbox-logs --session-id e2b-abc123
+
+# Download results without terminating
+parallel-cc sandbox-download --session-id e2b-abc123 --output ./results
+
+# Kill running sandbox
+parallel-cc sandbox-kill --session-id e2b-abc123
+
+# Test upload/download without execution
+parallel-cc sandbox-run --dry-run --repo .
+```
+
+### Database Schema Changes
+
+```sql
+-- Extend sessions table for E2B support
+ALTER TABLE sessions ADD COLUMN execution_mode TEXT DEFAULT 'local';
+ALTER TABLE sessions ADD COLUMN sandbox_id TEXT;
+ALTER TABLE sessions ADD COLUMN prompt TEXT;
+ALTER TABLE sessions ADD COLUMN status TEXT DEFAULT 'active';
+ALTER TABLE sessions ADD COLUMN output_log TEXT;
+```
+
+### Technical Architecture
+
+```
+┌─────────────────────────────────────────────┐
+│     E2B Sandbox Execution Flow              │
+├─────────────────────────────────────────────┤
+│ 1. Create worktree via gtr                  │
+│ 2. Register E2B session in SQLite           │
+│ 3. Spin up anthropic-claude-code sandbox    │
+│ 4. Run `claude update` (ensure latest)      │
+│ 5. Upload worktree files (tarball)          │
+│ 6. Execute: echo "$PROMPT" | claude -p      │
+│    --dangerously-skip-permissions           │
+│ 7. Stream output, monitor progress          │
+│ 8. Download changed files only              │
+│ 9. Create git commit in worktree            │
+│ 10. Cleanup: terminate sandbox              │
+└─────────────────────────────────────────────┘
+```
+
+### New TypeScript Modules
+
+```
+src/
+├── e2b/
+│   ├── sandbox-manager.ts    # Create/manage E2B sandboxes
+│   ├── file-sync.ts          # Upload/download with compression
+│   ├── claude-runner.ts      # Execute Claude Code in sandbox
+│   └── output-monitor.ts     # Stream and capture output
+├── types.ts                   # E2B config and session types
+└── coordinator.ts             # Extended for E2B sessions
+```
+
+### Safety & Cost Controls
+
+- **Isolation**: Sandbox has zero access to your local system
+- **Worktree-only**: Never executes in main branch
+- **Manual review**: All changes require your review before merge
+- **Timeout enforcement**: Hard limit at 1 hour (configurable down)
+- **Cost warnings**: Alerts at 30min and 50min marks
+- **Interrupt mechanism**: Kill sandbox anytime with `sandbox-kill`
+- **Dry-run mode**: Test upload/download without execution
+
+### Dependencies
+
+- E2B SDK: `npm install e2b` (v1.x)
+- E2B API key: Sign up at https://e2b.dev
+- Anthropic API key: For Claude Code in sandbox
+
+### Success Metrics
+
+- Execute 30+ minute autonomous tasks without intervention ✓
+- File sync works for repos up to 500MB ✓
+- Real-time or near-real-time output visibility ✓
+- Cost <$5 per 1-hour sandbox session ✓
+- Seamless git integration with worktrees ✓
+
+### Implementation Phases
+
+**Phase 1 (Week 1-2): Foundation**
+- Install E2B SDK dependencies
+- Implement sandbox creation/termination
+- Build file upload/download with compression
+- Add E2B session tracking to database
+- Validate critical assumptions (Claude Code version, plan execution)
+
+**Phase 2 (Week 3-4): Core Execution**
+- Implement `sandbox-run` command
+- Build Claude Code execution with `claude update`
+- Stream output monitoring
+- Add timeout and kill mechanisms
+- Implement git commit creation after download
+
+**Phase 3 (Week 5): Optimization**
+- Optimize file sync (selective downloads)
+- Add cost tracking and warnings
+- Improve error handling and recovery
+- Comprehensive logging
+
+**Phase 4 (Week 6): Polish**
+- Add `--dry-run` mode
+- Build session monitoring UI
+- Write integration tests
+- Documentation and examples
+- Real-world validation with large repos
+
+### Integration Points
+
+**With existing parallel-cc:**
+- Uses same `gtr` worktree infrastructure
+- Shares SQLite database with local sessions
+- Compatible with `parallel-cc status` and other commands
+- Works seamlessly with existing `claude-parallel` wrapper
+
+**With APM (if using):**
+- Can execute `.apm/Implementation_Plan.md` autonomously
+- Optional `--focus-phase N` to run specific phases
+- Integrates with APM memory logs for continuity
+
+**With v0.3 MCP Server (future):**
+- MCP could expose `execute_in_sandbox` tool
+- Claude could decide when to delegate to sandbox
+- Enables hybrid local + sandbox workflows
+
+### Why This Makes parallel-cc Essential
+
+Before E2B integration:
+- parallel-cc solves git worktree coordination for parallel sessions
+- Valuable but somewhat niche use case
+
+After E2B integration:
+- parallel-cc becomes a **complete autonomous development platform**
+- Plan → Execute (unattended for hours) → Review workflow
+- Safe experimentation without risking your local environment
+- Enables true "AI pair programmer that works while you sleep" experience
+- Worktree isolation provides safety net for autonomous execution
+
+**This is the killer feature that makes parallel-cc a must-have tool.**
+
+### Open Questions for Future Iterations
+
+1. Private dependencies: GitHub PAT injection for private repos?
+2. Multi-file plans: Support for task decomposition across multiple plan files?
+3. Parallel E2B sessions: Run multiple independent tasks simultaneously?
+4. Cost optimization: Sandbox pooling, pause/resume, cheaper tiers?
+5. APM orchestrator integration: Deep integration with apm-fhb workflows?
 
 ---
 
