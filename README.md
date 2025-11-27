@@ -215,9 +215,12 @@ git merge <worktree-branch-name>
 
 - [x] **v0.1** - Project structure
 - [x] **v0.2** - CLI + SQLite + wrapper script
+- [ ] **v0.2.x** - Interactive installation (alias & hooks setup)
 - [ ] **v0.3** - MCP server for status queries
 - [ ] **v0.4** - Branch merge detection + notifications
 - [ ] **v0.5** - File-level conflict detection
+
+See [ROADMAP.md](./ROADMAP.md) for detailed feature specs and installation improvements.
 
 ## 🔍 Troubleshooting
 

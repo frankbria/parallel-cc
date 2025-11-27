@@ -202,39 +202,78 @@ parallel-cc install --hooks
 }
 ```
 
-### v0.2.2 - Global Hook Installation
+### v0.2.2 - Interactive Heartbeat Hook Setup (PRIORITY)
 
-Add `--global` flag for user-wide installation:
+Add optional prompt during `./scripts/install.sh` to automatically configure the heartbeat hook:
 
 ```bash
-# Install hooks globally to ~/.claude/settings.json
-parallel-cc install --hooks --global
+# During installation:
+./scripts/install.sh
+
+# ... after successful installation ...
+# Prompt: "Would you like to add the heartbeat hook for better session tracking? [y/N]"
+# Prompt: "Install globally (~/.claude/settings.json) or locally (current repo)? [global/local/skip]"
 ```
 
 **Behavior:**
-1. Check if `~/.claude/settings.json` exists
-2. Merge hooks with existing config
-3. Warn if hooks already exist (offer to skip or overwrite)
+1. After successful installation, prompt user for heartbeat hook
+2. If yes, ask: global vs local installation
+3. **Global:** Add to `~/.claude/settings.json` (affects all repos)
+4. **Local:** Add to `./.claude/settings.json` (current repo only)
+5. Check if hooks already exist before adding
+6. Preserve existing hooks when merging
+7. Show confirmation message with file path
 
-### v0.2.3 - Alias Installation
+**Hook Configuration Added:**
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/parallel-cc-heartbeat.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
-Add `--alias` flag to add the shell alias:
+**Alternative:** Also support `--hooks` flag for non-interactive mode:
+```bash
+parallel-cc install --hooks          # Prompts for global/local
+parallel-cc install --hooks --global # Adds to ~/.claude/settings.json
+parallel-cc install --hooks --local  # Adds to ./.claude/settings.json
+```
+
+### v0.2.3 - Interactive Alias Setup (PRIORITY)
+
+Add optional prompt during `./scripts/install.sh` to automatically configure the shell alias:
 
 ```bash
-# Add alias to shell profile
-parallel-cc install --alias
+# During installation:
+./scripts/install.sh
 
-# Detects shell (bash/zsh/fish) and adds appropriate alias
-# For bash/zsh: alias claude='claude-parallel'
-# For fish: alias claude 'claude-parallel'
+# ... after successful installation ...
+# Prompt: "Would you like to add 'alias claude=claude-parallel' to your shell profile? [y/N]"
 ```
 
 **Behavior:**
-1. Detect current shell from `$SHELL`
-2. Find appropriate profile file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
-3. Check if alias already exists
-4. Append alias if not present
-5. Prompt user to `source` the file or open new terminal
+1. After successful installation, prompt user
+2. Detect current shell from `$SHELL` (bash/zsh/fish)
+3. Find appropriate profile file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
+4. Check if alias already exists
+5. If yes: append alias to profile file
+6. Show message: "✓ Alias added to ~/.bashrc - restart your shell or run: source ~/.bashrc"
+
+**Alternative:** Also support `--alias` flag for non-interactive mode:
+```bash
+parallel-cc install --alias  # Adds alias without prompting
+```
 
 ### v0.2.4 - Full Installation Command
 
