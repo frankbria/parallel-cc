@@ -1,17 +1,353 @@
 # parallel-cc Roadmap & Future Specs
 
-## Version History
+## Document Purpose
 
-- **v0.1** - Project structure, types, schema design ✅
-- **v0.2** - CLI + SQLite + wrapper script ✅ (current)
-- **v0.3** - MCP Server for Status Queries (planned)
-- **v0.4** - Branch Merge Detection & Rebase Assistance (planned)
-- **v0.5** - File-Level Conflict Detection (planned)
-- **v1.0** - E2B Sandbox Integration for Autonomous Execution (major milestone)
+This document serves as the definitive source of truth for parallel-cc's development roadmap. It is designed to be used by:
+- **Human developers** planning and implementing features
+- **AI agents** (Claude, etc.) understanding project scope and planning development tasks
+- **Contributors** proposing enhancements and understanding project direction
+
+All versions are linked for easy navigation, and each section includes status, overview, and implementation details suitable for both human and AI-driven development.
+
+## Version Roadmap
+
+### Completed Versions
+
+- **[v0.1](#v01---project-foundation)** - Project structure, types, schema design ✅
+- **[v0.2](#v02---core-infrastructure)** - CLI + SQLite + wrapper script ✅ (current)
+
+### Planned Versions
+
+- **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration (hooks during install + CLI command)
+- **[v0.2.3-v0.2.4](#installation-improvements)** - Additional installation enhancements (aliases, full setup automation)
+- **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries
+- **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance
+- **[v0.5](#v05---file-level-conflict-detection)** - File-Level Conflict Detection
+- **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration for Autonomous Execution (major milestone)
+
+---
+
+## v0.1 - Project Foundation
+
+**Status:** Completed ✅
+
+### Overview
+Initial project architecture establishing the foundation for parallel Claude Code session coordination.
+
+### Deliverables
+- Project directory structure and build configuration
+- TypeScript type definitions for sessions, worktrees, and coordinator state
+- SQLite database schema design for session tracking
+- Core domain models and interfaces
+
+---
+
+## v0.2 - Core Infrastructure
+
+**Status:** Completed ✅ (Current Version)
+
+### Overview
+Implemented the complete CLI, database layer, and wrapper script for basic parallel session coordination.
+
+### Key Features
+- **CLI Commands:** `start`, `stop`, `status`, `list`, `cleanup`
+- **Session Tracking:** SQLite database for persistent session state
+- **Worktree Management:** Integration with `gtr` for git worktree coordination
+- **Wrapper Script:** `claude-parallel` command that wraps Claude Code with automatic session registration
+- **Heartbeat Monitoring:** Basic session liveness detection
+
+### Components Delivered
+- `src/coordinator.ts` - Core session management logic
+- `src/cli/index.ts` - Command-line interface
+- `scripts/claude-parallel.sh` - Wrapper script
+- Installation and setup scripts
+
+---
+
+### v0.2.1 - Hook Installation & Configuration (PRIORITY)
+
+**Status:** Planned (High Priority)
+
+**Overview:** Automate heartbeat hook setup both during initial installation and via CLI command for existing installations.
+
+#### Installation Script Enhancement
+
+Add optional prompt during `./scripts/install.sh` to automatically configure the heartbeat hook:
+
+```bash
+# During installation:
+./scripts/install.sh
+
+# ... after successful installation ...
+# Prompt: "Would you like to add the heartbeat hook for better session tracking? [y/N]"
+# Prompt: "Install globally (~/.claude/settings.json) or locally (current repo)? [global/local/skip]"
+```
+
+**Behavior:**
+1. After successful installation, prompt user for heartbeat hook
+2. If yes, ask: global vs local installation
+3. **Global:** Add to `~/.claude/settings.json` (affects all repos)
+4. **Local:** Add to `./.claude/settings.json` (current repo only)
+5. Check if hooks already exist before adding
+6. Preserve existing hooks when merging
+7. Show confirmation message with file path
+
+#### CLI Command for Post-Installation Setup
+
+Add `--install-hooks` flag to configure hooks after installation:
+
+```bash
+# Configure hooks for current repo
+parallel-cc install --hooks
+
+# Non-interactive modes
+parallel-cc install --hooks --global # Adds to ~/.claude/settings.json
+parallel-cc install --hooks --local  # Adds to ./.claude/settings.json
+```
+
+**CLI Behavior:**
+1. Interactive mode (just `--hooks`): Prompts for global/local
+2. Check if `.claude/settings.json` exists
+3. If exists, merge hooks (preserve existing config)
+4. If not, create with just the parallel-cc hooks
+5. Add `.claude/` to `.gitignore` if not already there (optional, prompt user)
+
+#### Hook Configuration Added
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/parallel-cc-heartbeat.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Installation Improvements
+
+### v0.2.3 - Interactive Alias Setup (PRIORITY)
+
+**Status:** Planned (High Priority)
+
+Add optional prompt during `./scripts/install.sh` to automatically configure the shell alias:
+
+```bash
+# During installation:
+./scripts/install.sh
+
+# ... after successful installation ...
+# Prompt: "Would you like to add 'alias claude=claude-parallel' to your shell profile? [y/N]"
+```
+
+**Behavior:**
+1. After successful installation, prompt user
+2. Detect current shell from `$SHELL` (bash/zsh/fish)
+3. Find appropriate profile file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
+4. Check if alias already exists
+5. If yes: append alias to profile file
+6. Show message: "✓ Alias added to ~/.bashrc - restart your shell or run: source ~/.bashrc"
+
+**Alternative:** Also support `--alias` flag for non-interactive mode:
+```bash
+parallel-cc install --alias  # Adds alias without prompting
+```
+
+### v0.2.4 - Full Installation Command
+
+**Status:** Planned
+
+Combine all installation options:
+
+```bash
+# Full installation with all options
+parallel-cc install --all
+
+# Equivalent to:
+parallel-cc install --hooks --global --alias
+
+# Interactive mode (prompts for each option)
+parallel-cc install --interactive
+```
+
+---
+
+## v0.3 - MCP Server for Status Queries
+
+**Status:** Planned
+
+### Overview
+Add an MCP server so Claude Code can query the coordinator mid-session to understand what other sessions are doing.
+
+### Tools to Implement
+
+#### `get_parallel_status`
+Returns info about all active sessions in the current repo.
+
+```typescript
+// Input
+{ repo_path?: string }
+
+// Output
+{
+  sessions: [
+    {
+      pid: number,
+      worktreePath: string,
+      worktreeName: string,
+      isMainRepo: boolean,
+      durationMinutes: number,
+      isAlive: boolean
+    }
+  ],
+  totalSessions: number
+}
+```
+
+**Use case:** Claude can say "There are 2 other sessions active - one has been running for 45 minutes in the auth-feature worktree."
+
+#### `get_my_session`
+Returns info about the current session.
+
+```typescript
+// Output
+{
+  sessionId: string,
+  worktreePath: string,
+  worktreeName: string | null,
+  isMainRepo: boolean,
+  startedAt: string,
+  parallelSessions: number
+}
+```
+
+**Use case:** Claude can check "Am I in a worktree or the main repo?"
+
+#### `notify_when_merged`
+Subscribe to notifications when a branch is merged to main.
+
+```typescript
+// Input
+{ branch: string }
+
+// Output  
+{ subscribed: true }
+
+// Later, MCP notification:
+{ event: "branch_merged", branch: "feature-auth", mergedBy: "user" }
+```
+
+**Use case:** Claude working on frontend can be notified when the backend branch merges, prompting a rebase.
+
+### Implementation Notes
+- MCP server runs alongside CLI (same SQLite DB)
+- Consider using `@modelcontextprotocol/sdk` for TypeScript
+- Server started via `parallel-cc mcp-serve` or auto-started by Claude Code config
+
+---
+
+## v0.4 - Branch Merge Detection & Rebase Assistance
+
+**Status:** Planned
+
+### Overview
+Proactively detect when parallel branches are merged and help coordinate rebases.
+
+### Features
+
+#### Merge Detection
+- Poll git for merged branches every N seconds
+- Detect when worktree branches have been merged to main
+- Track merge events in SQLite
+
+#### Rebase Prompts
+When a parallel branch merges:
+1. MCP server sends notification to active sessions
+2. Claude can prompt: "The `auth-backend` branch was just merged. Want me to rebase your work?"
+3. If yes, Claude runs `git fetch && git rebase origin/main`
+
+#### Conflict Resolution Assistance
+- Detect rebase conflicts
+- Provide context about what the other branch changed
+- Suggest resolution strategies
+
+### Database Additions
+```sql
+CREATE TABLE merge_events (
+  id TEXT PRIMARY KEY,
+  branch TEXT NOT NULL,
+  merged_at TEXT NOT NULL,
+  merged_into TEXT DEFAULT 'main',
+  notified_sessions TEXT  -- JSON array of session IDs notified
+);
+
+CREATE TABLE subscriptions (
+  session_id TEXT,
+  branch TEXT,
+  created_at TEXT,
+  PRIMARY KEY (session_id, branch)
+);
+```
+
+---
+
+## v0.5 - File-Level Conflict Detection
+
+**Status:** Planned
+
+### Overview
+Track which files each session is modifying to warn about potential conflicts before they happen.
+
+### Features
+
+#### File Claim System
+- Sessions register files they intend to modify
+- Coordinator warns if another session has claimed the same file
+- Claims can be advisory (warn) or exclusive (block)
+
+#### Tools
+```typescript
+// Claim files before editing
+claim_files({ files: string[], mode: 'advisory' | 'exclusive' })
+
+// Check for conflicts
+check_conflicts({ files: string[] }) 
+// Returns: { conflicts: [{ file, claimedBy, sessionId }] }
+
+// Release claims
+release_files({ files: string[] })
+```
+
+#### PreToolUse Hook Integration
+- Hook checks claims before Edit tool runs
+- Can warn or block based on configuration
+
+### Database Additions
+```sql
+CREATE TABLE file_claims (
+  session_id TEXT,
+  file_path TEXT,
+  claim_mode TEXT DEFAULT 'advisory',
+  claimed_at TEXT,
+  PRIMARY KEY (session_id, file_path)
+);
+```
 
 ---
 
 ## v1.0 - E2B Sandbox Integration 🚀
+
+**Status:** Planned (Major Milestone)
 
 ### Overview
 **Game-changing feature:** Enable truly autonomous, long-running Claude Code execution in isolated E2B cloud sandboxes. This transforms parallel-cc from a worktree coordinator into a full autonomous development platform.
@@ -223,291 +559,6 @@ After E2B integration:
 3. Parallel E2B sessions: Run multiple independent tasks simultaneously?
 4. Cost optimization: Sandbox pooling, pause/resume, cheaper tiers?
 5. APM orchestrator integration: Deep integration with apm-fhb workflows?
-
----
-
-## v0.3 - MCP Server for Status Queries
-
-### Overview
-Add an MCP server so Claude Code can query the coordinator mid-session to understand what other sessions are doing.
-
-### Tools to Implement
-
-#### `get_parallel_status`
-Returns info about all active sessions in the current repo.
-
-```typescript
-// Input
-{ repo_path?: string }
-
-// Output
-{
-  sessions: [
-    {
-      pid: number,
-      worktreePath: string,
-      worktreeName: string,
-      isMainRepo: boolean,
-      durationMinutes: number,
-      isAlive: boolean
-    }
-  ],
-  totalSessions: number
-}
-```
-
-**Use case:** Claude can say "There are 2 other sessions active - one has been running for 45 minutes in the auth-feature worktree."
-
-#### `get_my_session`
-Returns info about the current session.
-
-```typescript
-// Output
-{
-  sessionId: string,
-  worktreePath: string,
-  worktreeName: string | null,
-  isMainRepo: boolean,
-  startedAt: string,
-  parallelSessions: number
-}
-```
-
-**Use case:** Claude can check "Am I in a worktree or the main repo?"
-
-#### `notify_when_merged`
-Subscribe to notifications when a branch is merged to main.
-
-```typescript
-// Input
-{ branch: string }
-
-// Output  
-{ subscribed: true }
-
-// Later, MCP notification:
-{ event: "branch_merged", branch: "feature-auth", mergedBy: "user" }
-```
-
-**Use case:** Claude working on frontend can be notified when the backend branch merges, prompting a rebase.
-
-### Implementation Notes
-- MCP server runs alongside CLI (same SQLite DB)
-- Consider using `@modelcontextprotocol/sdk` for TypeScript
-- Server started via `parallel-cc mcp-serve` or auto-started by Claude Code config
-
----
-
-## v0.4 - Branch Merge Detection & Rebase Assistance
-
-### Overview
-Proactively detect when parallel branches are merged and help coordinate rebases.
-
-### Features
-
-#### Merge Detection
-- Poll git for merged branches every N seconds
-- Detect when worktree branches have been merged to main
-- Track merge events in SQLite
-
-#### Rebase Prompts
-When a parallel branch merges:
-1. MCP server sends notification to active sessions
-2. Claude can prompt: "The `auth-backend` branch was just merged. Want me to rebase your work?"
-3. If yes, Claude runs `git fetch && git rebase origin/main`
-
-#### Conflict Resolution Assistance
-- Detect rebase conflicts
-- Provide context about what the other branch changed
-- Suggest resolution strategies
-
-### Database Additions
-```sql
-CREATE TABLE merge_events (
-  id TEXT PRIMARY KEY,
-  branch TEXT NOT NULL,
-  merged_at TEXT NOT NULL,
-  merged_into TEXT DEFAULT 'main',
-  notified_sessions TEXT  -- JSON array of session IDs notified
-);
-
-CREATE TABLE subscriptions (
-  session_id TEXT,
-  branch TEXT,
-  created_at TEXT,
-  PRIMARY KEY (session_id, branch)
-);
-```
-
----
-
-## v0.5 - File-Level Conflict Detection
-
-### Overview
-Track which files each session is modifying to warn about potential conflicts before they happen.
-
-### Features
-
-#### File Claim System
-- Sessions register files they intend to modify
-- Coordinator warns if another session has claimed the same file
-- Claims can be advisory (warn) or exclusive (block)
-
-#### Tools
-```typescript
-// Claim files before editing
-claim_files({ files: string[], mode: 'advisory' | 'exclusive' })
-
-// Check for conflicts
-check_conflicts({ files: string[] }) 
-// Returns: { conflicts: [{ file, claimedBy, sessionId }] }
-
-// Release claims
-release_files({ files: string[] })
-```
-
-#### PreToolUse Hook Integration
-- Hook checks claims before Edit tool runs
-- Can warn or block based on configuration
-
-### Database Additions
-```sql
-CREATE TABLE file_claims (
-  session_id TEXT,
-  file_path TEXT,
-  claim_mode TEXT DEFAULT 'advisory',
-  claimed_at TEXT,
-  PRIMARY KEY (session_id, file_path)
-);
-```
-
----
-
-## Installation Improvements
-
-### v0.2.1 - Local Repo Hook Installation
-
-Add `--install-hooks` flag to configure hooks for the current repo:
-
-```bash
-# Install hooks to current repo's .claude/settings.json
-parallel-cc install --hooks
-
-# Creates/updates .claude/settings.json in current repo
-```
-
-**Behavior:**
-1. Check if `.claude/settings.json` exists
-2. If exists, merge hooks (preserve existing config)
-3. If not, create with just the parallel-cc hooks
-4. Add `.claude/` to `.gitignore` if not already there (optional, prompt user)
-
-**Config added:**
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.local/bin/parallel-cc-heartbeat.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### v0.2.2 - Interactive Heartbeat Hook Setup (PRIORITY)
-
-Add optional prompt during `./scripts/install.sh` to automatically configure the heartbeat hook:
-
-```bash
-# During installation:
-./scripts/install.sh
-
-# ... after successful installation ...
-# Prompt: "Would you like to add the heartbeat hook for better session tracking? [y/N]"
-# Prompt: "Install globally (~/.claude/settings.json) or locally (current repo)? [global/local/skip]"
-```
-
-**Behavior:**
-1. After successful installation, prompt user for heartbeat hook
-2. If yes, ask: global vs local installation
-3. **Global:** Add to `~/.claude/settings.json` (affects all repos)
-4. **Local:** Add to `./.claude/settings.json` (current repo only)
-5. Check if hooks already exist before adding
-6. Preserve existing hooks when merging
-7. Show confirmation message with file path
-
-**Hook Configuration Added:**
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.local/bin/parallel-cc-heartbeat.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**Alternative:** Also support `--hooks` flag for non-interactive mode:
-```bash
-parallel-cc install --hooks          # Prompts for global/local
-parallel-cc install --hooks --global # Adds to ~/.claude/settings.json
-parallel-cc install --hooks --local  # Adds to ./.claude/settings.json
-```
-
-### v0.2.3 - Interactive Alias Setup (PRIORITY)
-
-Add optional prompt during `./scripts/install.sh` to automatically configure the shell alias:
-
-```bash
-# During installation:
-./scripts/install.sh
-
-# ... after successful installation ...
-# Prompt: "Would you like to add 'alias claude=claude-parallel' to your shell profile? [y/N]"
-```
-
-**Behavior:**
-1. After successful installation, prompt user
-2. Detect current shell from `$SHELL` (bash/zsh/fish)
-3. Find appropriate profile file (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish)
-4. Check if alias already exists
-5. If yes: append alias to profile file
-6. Show message: "✓ Alias added to ~/.bashrc - restart your shell or run: source ~/.bashrc"
-
-**Alternative:** Also support `--alias` flag for non-interactive mode:
-```bash
-parallel-cc install --alias  # Adds alias without prompting
-```
-
-### v0.2.4 - Full Installation Command
-
-Combine all installation options:
-
-```bash
-# Full installation with all options
-parallel-cc install --all
-
-# Equivalent to:
-parallel-cc install --hooks --global --alias
-
-# Interactive mode (prompts for each option)
-parallel-cc install --interactive
-```
 
 ---
 
