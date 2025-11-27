@@ -64,6 +64,14 @@ export function getGlobalSettingsPath(): string {
 }
 
 /**
+ * Get the path to Claude MCP configuration file
+ * Note: MCP servers go in ~/.claude.json, NOT ~/.claude/settings.json
+ */
+export function getMcpConfigPath(): string {
+  return join(homedir(), '.claude.json');
+}
+
+/**
  * Get the path to local Claude settings file for a repository
  */
 export function getLocalSettingsPath(repoPath: string): string {
@@ -781,10 +789,11 @@ export function mergeMcpServerIntoSettings(
 }
 
 /**
- * Install MCP server configuration to global Claude settings
+ * Install MCP server configuration to ~/.claude.json
+ * Note: MCP servers go in ~/.claude.json, NOT ~/.claude/settings.json
  */
 export function installMcpServer(options: { dryRun?: boolean } = {}): InstallMcpResult {
-  const settingsPath = getGlobalSettingsPath();
+  const settingsPath = getMcpConfigPath();
 
   const result: InstallMcpResult = {
     success: false,
@@ -828,10 +837,10 @@ export function installMcpServer(options: { dryRun?: boolean } = {}): InstallMcp
 }
 
 /**
- * Uninstall MCP server configuration from global Claude settings
+ * Uninstall MCP server configuration from ~/.claude.json
  */
 export function uninstallMcpServer(): InstallMcpResult {
-  const settingsPath = getGlobalSettingsPath();
+  const settingsPath = getMcpConfigPath();
 
   const result: InstallMcpResult = {
     success: false,
@@ -874,7 +883,7 @@ export function checkMcpStatus(): {
   installed: boolean;
   settingsPath: string;
 } {
-  const settingsPath = getGlobalSettingsPath();
+  const settingsPath = getMcpConfigPath();
   const settings = readSettings(settingsPath);
 
   return {

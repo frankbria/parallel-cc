@@ -48,7 +48,7 @@
 │       │                                                      │
 │       ├──► Alias: ~/.bashrc / ~/.zshrc / config.fish        │
 │       │                                                      │
-│       └──► MCP: mcpServers config in settings.json          │
+│       └──► MCP: mcpServers config in ~/.claude.json         │
 │                                                              │
 │  PostToolUse hook → parallel-cc-heartbeat.sh                │
 │       └──► Updates session last_heartbeat in SQLite         │
