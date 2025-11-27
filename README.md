@@ -100,7 +100,7 @@ export PARALLEL_CC_DATA_DIR="$HOME/.config/parallel-cc"
 ./scripts/uninstall.sh
 ```
 
-The uninstall script safely removes all installed files while preserving your session data.
+The uninstall script offers to remove configurations (hooks, alias, MCP) before removing installed files. Session data is preserved unless manually deleted.
 
 ### Recommended: Create an alias
 
@@ -294,6 +294,8 @@ parallel-cc cleanup
 ```bash
 parallel-cc doctor
 ```
+
+This checks dependencies (gtr, git, jq), database location, configuration, and MCP server status.
 
 ## 🤝 Contributing
 
