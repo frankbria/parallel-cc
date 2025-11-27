@@ -4,7 +4,7 @@
 
 `parallel-cc` is a coordinator for running multiple Claude Code sessions in parallel on the same repository. It uses git worktrees to isolate each session's work.
 
-**Current Version:** 0.2.4
+**Current Version:** 0.3.0
 
 ## Architecture
 
@@ -21,20 +21,34 @@
 │       │         │                                            │
 │       │         └──► gtr new (if parallel session exists)   │
 │       │                                                      │
+│       ├──► export PARALLEL_CC_SESSION_ID (v0.3)             │
+│       │                                                      │
 │       └──► exec claude (in worktree directory)              │
 │                                                              │
 │  On exit: parallel-cc release → cleanup worktree            │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  Installation & Configuration (v0.2.4)                       │
-│  ─────────────────────────────────────                       │
-│  parallel-cc install --all (hooks + alias)                   │
+│  MCP Server (v0.3)                                          │
+│  ─────────────────                                          │
+│  parallel-cc mcp-serve (stdio transport)                    │
+│       │                                                      │
+│       ├──► get_parallel_status - query active sessions      │
+│       ├──► get_my_session - current session info            │
+│       └──► notify_when_merged - branch watch (stub)         │
+│                                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Installation & Configuration (v0.3)                         │
+│  ───────────────────────────────────                         │
+│  parallel-cc install --all (hooks + alias + MCP)            │
 │       │                                                      │
 │       ├──► Hooks: ~/.claude/settings.json (global)          │
 │       │         or ./.claude/settings.json (local)          │
 │       │                                                      │
-│       └──► Alias: ~/.bashrc / ~/.zshrc / config.fish        │
+│       ├──► Alias: ~/.bashrc / ~/.zshrc / config.fish        │
+│       │                                                      │
+│       └──► MCP: mcpServers config in settings.json          │
 │                                                              │
 │  PostToolUse hook → parallel-cc-heartbeat.sh                │
 │       └──► Updates session last_heartbeat in SQLite         │
@@ -58,9 +72,13 @@ src/
 ├── coordinator.ts     # Core logic - session management
 ├── db.ts              # SQLite operations via better-sqlite3
 ├── gtr.ts             # Wrapper for gtr CLI commands (v1.x and v2.x)
-├── hooks-installer.ts # Hook + alias configuration (v0.2.4)
+├── hooks-installer.ts # Hook + alias + MCP configuration
 ├── logger.ts          # Logging utilities
-└── types.ts           # TypeScript type definitions
+├── types.ts           # TypeScript type definitions
+└── mcp/               # MCP server module (v0.3)
+    ├── index.ts       # Server setup and tool registration
+    ├── tools.ts       # Tool implementations
+    └── schemas.ts     # Zod schemas for inputs/outputs
 
 scripts/
 ├── claude-parallel.sh  # Wrapper script (main entry point for users)
@@ -69,7 +87,11 @@ scripts/
 └── uninstall.sh        # Removal script
 
 tests/
-└── hooks-installer.test.ts  # Unit tests (70+ tests, 92%+ coverage)
+├── db.test.ts              # SessionDB tests (55 tests)
+├── coordinator.test.ts     # Coordinator tests (37 tests)
+├── gtr.test.ts             # GtrWrapper tests (49 tests)
+├── hooks-installer.test.ts # Hook installer tests (76 tests)
+└── mcp.test.ts             # MCP tools tests (50 tests)
 
 vitest.config.ts  # Test framework configuration (project root)
 ```
@@ -77,11 +99,12 @@ vitest.config.ts  # Test framework configuration (project root)
 ## Key Concepts
 
 1. **Wrapper Script** - `claude-parallel` wraps the `claude` command, handling registration before launch
-2. **Sessions** - Each Claude Code process is tracked in SQLite by PID
+2. **Sessions** - Each Claude Code process is tracked in SQLite by PID and session ID
 3. **Worktrees** - Parallel sessions get isolated git worktrees via `gtr` (v1.x or v2.x auto-detected)
 4. **Heartbeats** - Optional PostToolUse hook updates timestamps for stale detection
 5. **Auto-cleanup** - Dead sessions and their worktrees are cleaned up automatically
 6. **Hook Installer** - CLI tool to configure Claude Code settings for heartbeat integration
+7. **MCP Server** - Exposes tools for Claude to query session status (v0.3)
 
 ## Development Commands
 
@@ -99,9 +122,12 @@ npm test -- --coverage  # Run tests with coverage report
 **Framework:** Vitest 2.1.x with v8 coverage
 
 **Current Status:**
-- 41 tests, 100% passing
-- hooks-installer.ts: 92%+ coverage
-- Global coverage target (>85%) deferred to v0.3
+- 267 tests, 100% passing
+- Overall coverage: >85%
+- db.ts: 98%+ coverage
+- coordinator.ts: 100% coverage
+- gtr.ts: 100% coverage
+- hooks-installer.ts: 86%+ coverage
 
 **Running Tests:**
 ```bash
@@ -122,9 +148,13 @@ node dist/cli.js status
 node dist/cli.js register --repo $(pwd) --pid $$ --json
 node dist/cli.js release --pid $$
 
-# Test hook installation (v0.2.1)
+# Test hook installation
 node dist/cli.js install --status
 node dist/cli.js install --hooks --local --repo /tmp/test-repo
+
+# Test MCP installation (v0.3)
+node dist/cli.js install --mcp
+node dist/cli.js mcp-serve  # Start MCP server (stdio)
 
 # Test wrapper script
 ./scripts/claude-parallel.sh --help
@@ -161,14 +191,40 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 | `status [--repo <path>]` | Show active sessions |
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
-| `install --all` | Install hooks globally + shell alias |
+| `mcp-serve` | Start MCP server (stdio transport) |
+| `install --all` | Install hooks globally + alias + MCP |
 | `install --interactive` | Prompted installation for all options |
 | `install --hooks` | Install heartbeat hooks (interactive) |
 | `install --hooks --global` | Install hooks to ~/.claude/settings.json |
 | `install --hooks --local` | Install hooks to ./.claude/settings.json |
 | `install --alias` | Add claude=claude-parallel to shell profile |
-| `install --uninstall` | Remove installed hooks/alias |
+| `install --mcp` | Configure MCP server in Claude settings |
+| `install --uninstall` | Remove installed hooks/alias/MCP |
 | `install --status` | Check installation status |
+
+## MCP Server Tools (v0.3)
+
+The MCP server exposes three tools for Claude Code to query:
+
+### `get_parallel_status`
+Returns info about all active sessions in the current repo.
+```typescript
+// Input: { repo_path?: string }
+// Output: { sessions: SessionInfo[], totalSessions: number }
+```
+
+### `get_my_session`
+Returns info about the current session (requires PARALLEL_CC_SESSION_ID env var).
+```typescript
+// Output: { sessionId, worktreePath, worktreeName, isMainRepo, startedAt, parallelSessions }
+```
+
+### `notify_when_merged`
+Subscribe to notifications when a branch is merged (stub in v0.3, full implementation in v0.4).
+```typescript
+// Input: { branch: string }
+// Output: { subscribed: boolean, message: string }
+```
 
 ## Integration Flow
 
@@ -177,11 +233,12 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 3. Wrapper calls `parallel-cc register --repo <path> --pid $$`
 4. Coordinator checks for existing sessions in SQLite
 5. If parallel session exists, coordinator calls `gtr new` to create worktree
-6. Coordinator returns JSON with `worktreePath`
-7. Wrapper `cd`s to worktree path
-8. Wrapper `exec`s `claude` in the new directory
-9. On exit, trap calls `parallel-cc release --pid $$`
-10. Coordinator removes session and cleans up worktree
+6. Coordinator returns JSON with `worktreePath` and `sessionId`
+7. Wrapper exports `PARALLEL_CC_SESSION_ID` for MCP tools
+8. Wrapper `cd`s to worktree path
+9. Wrapper `exec`s `claude` in the new directory
+10. On exit, trap calls `parallel-cc release --pid $$`
+11. Coordinator removes session and cleans up worktree
 
 ## Version History
 
@@ -190,18 +247,11 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 | v0.1 | ✅ Complete | Project foundation, types, schema |
 | v0.2 | ✅ Complete | CLI, SQLite, wrapper script |
 | v0.2.1 | ✅ Complete | Hook installer CLI, Vitest testing |
-| v0.2.4 | ✅ Current | Shell alias setup, full install command |
-| v0.3 | Planned | MCP server, >85% test coverage |
+| v0.2.4 | ✅ Complete | Shell alias setup, full install command |
+| v0.3 | ✅ Current | MCP server, >85% test coverage |
 | v0.4 | Planned | Branch merge detection |
 | v0.5 | Planned | File-level conflict detection |
 | v1.0 | Planned | E2B sandbox integration |
-
-## Planned: MCP Server (v0.3)
-
-Will expose tools for Claude to query:
-- `get_parallel_status` - See what other sessions are doing
-- `get_my_session` - Check current session info
-- `notify_when_merged` - Alert when parallel branches merge
 
 ## Coding Standards
 
@@ -211,4 +261,4 @@ Will expose tools for Claude to query:
 - Explicit error handling
 - Meaningful variable names
 - Vitest for unit testing
-- >85% test coverage target (enforced in v0.3+)
+- >85% test coverage enforced

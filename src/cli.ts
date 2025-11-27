@@ -19,13 +19,17 @@ import {
   checkAliasStatus,
   installAll,
   checkAllStatus,
+  installMcpServer,
+  uninstallMcpServer,
+  checkMcpStatus,
   type InstallHooksOptions
 } from './hooks-installer.js';
+import { startMcpServer } from './mcp/index.js';
 
 program
   .name('parallel-cc')
   .description('Coordinate parallel Claude Code sessions using git worktrees')
-  .version('0.2.4');
+  .version('0.3.0');
 
 /**
  * Helper to prompt user for input (for interactive mode)
@@ -296,16 +300,17 @@ program
  */
 program
   .command('install')
-  .description('Configure parallel-cc hooks, alias, and settings')
+  .description('Configure parallel-cc hooks, alias, MCP server, and settings')
   .option('--hooks', 'Install PostToolUse heartbeat hook for better session tracking')
   .option('--alias', 'Add claude=claude-parallel alias to shell profile')
-  .option('--all', 'Install everything (hooks globally + alias)')
+  .option('--mcp', 'Configure MCP server in Claude Code settings (v0.3)')
+  .option('--all', 'Install everything (hooks globally + alias + MCP)')
   .option('--interactive', 'Interactive mode - prompt for each option')
   .option('--global', 'Install hooks to global settings (~/.claude/settings.json)')
   .option('--local', 'Install hooks to local settings (./.claude/settings.json)')
   .option('--repo <path>', 'Repository path for local installation', process.cwd())
   .option('--gitignore', 'Add .claude/ to .gitignore (for --local)')
-  .option('--uninstall', 'Remove installed hooks/alias instead of installing')
+  .option('--uninstall', 'Remove installed hooks/alias/MCP instead of installing')
   .option('--status', 'Check current installation status')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
@@ -341,6 +346,16 @@ program
         console.log(chalk.dim(`    Shell:  ${status.alias.shell}`));
         if (status.alias.profilePath) {
           console.log(chalk.dim(`    Path:   ${status.alias.profilePath}`));
+        }
+
+        // MCP status (v0.3)
+        console.log(chalk.bold('\n  MCP Server:'));
+        const mcpStatus = status.mcp?.installed
+          ? chalk.green('✓ Configured')
+          : chalk.dim('Not configured');
+        console.log(`    Status: ${mcpStatus}`);
+        if (status.mcp?.settingsPath) {
+          console.log(chalk.dim(`    Path:   ${status.mcp.settingsPath}`));
         }
         console.log('');
       }
@@ -386,6 +401,18 @@ program
             console.log(chalk.red(`✗ Alias failed: ${result.alias.error}`));
           }
         }
+
+        // Install MCP server config (v0.3)
+        const mcpResult = installMcpServer();
+        if (mcpResult.alreadyInstalled) {
+          console.log(chalk.green('✓ MCP server already configured'));
+        } else if (mcpResult.success) {
+          console.log(chalk.green('✓ MCP server configured'));
+        } else {
+          console.log(chalk.red(`✗ MCP server failed: ${mcpResult.error}`));
+          result.success = false;
+        }
+        console.log(chalk.dim(`  Path: ${mcpResult.settingsPath}`));
 
         if (!result.success) {
           process.exit(1);
@@ -496,6 +523,42 @@ program
       return;
     }
 
+    // Handle --mcp flag (v0.3)
+    if (options.mcp) {
+      if (options.uninstall) {
+        const result = uninstallMcpServer();
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else if (result.success) {
+          console.log(chalk.green('✓ MCP server configuration removed'));
+          console.log(chalk.dim(`  From: ${result.settingsPath}`));
+        } else {
+          console.error(chalk.red(`✗ Uninstall failed: ${result.error}`));
+          process.exit(1);
+        }
+        return;
+      }
+
+      const result = installMcpServer();
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.success) {
+        if (result.alreadyInstalled) {
+          console.log(chalk.green('✓ MCP server already configured'));
+        } else {
+          console.log(chalk.green('✓ MCP server configured'));
+          console.log(chalk.dim('  Claude Code will now be able to query parallel session status'));
+        }
+        console.log(chalk.dim(`  Path: ${result.settingsPath}`));
+      } else {
+        console.error(chalk.red(`✗ Installation failed: ${result.error}`));
+        process.exit(1);
+      }
+      return;
+    }
+
     // Handle --hooks flag
     if (options.hooks) {
       // Uninstall mode
@@ -579,13 +642,30 @@ program
     console.log(chalk.yellow('No action specified.'));
     console.log('');
     console.log('Examples:');
-    console.log('  parallel-cc install --all             # Install hooks + alias');
+    console.log('  parallel-cc install --all             # Install hooks + alias + MCP');
     console.log('  parallel-cc install --interactive     # Prompted installation');
     console.log('  parallel-cc install --hooks           # Install hooks (interactive)');
     console.log('  parallel-cc install --hooks --global  # Install hooks globally');
     console.log('  parallel-cc install --alias           # Install shell alias');
+    console.log('  parallel-cc install --mcp             # Configure MCP server');
     console.log('  parallel-cc install --status          # Check status');
     console.log('');
+  });
+
+/**
+ * MCP Server - expose tools for Claude Code to query session status
+ */
+program
+  .command('mcp-serve')
+  .description('Start MCP server for Claude Code integration (stdio transport)')
+  .action(async () => {
+    try {
+      await startMcpServer();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`MCP server failed: ${errorMessage}`);
+      process.exit(1);
+    }
   });
 
 // Parse and execute

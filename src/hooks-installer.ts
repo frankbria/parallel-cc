@@ -709,9 +709,176 @@ export function installAll(options: InstallAllOptions = {}): InstallAllResult {
 export function checkAllStatus(repoPath?: string): {
   hooks: ReturnType<typeof checkHooksStatus>;
   alias: ReturnType<typeof checkAliasStatus>;
+  mcp?: ReturnType<typeof checkMcpStatus>;
 } {
   return {
     hooks: checkHooksStatus({ repoPath }),
-    alias: checkAliasStatus()
+    alias: checkAliasStatus(),
+    mcp: checkMcpStatus()
+  };
+}
+
+// ============================================================================
+// MCP Server Installation (v0.3)
+// ============================================================================
+
+export interface McpServerConfig {
+  command: string;
+  args: string[];
+}
+
+export interface InstallMcpResult {
+  success: boolean;
+  settingsPath: string;
+  created: boolean;
+  merged: boolean;
+  alreadyInstalled: boolean;
+  error?: string;
+}
+
+/**
+ * Create the MCP server configuration for parallel-cc
+ */
+export function createMcpServerConfig(): McpServerConfig {
+  return {
+    command: 'parallel-cc',
+    args: ['mcp-serve']
+  };
+}
+
+/**
+ * Check if MCP server is configured in settings
+ */
+export function isMcpServerInstalled(settings: ClaudeSettings | null): boolean {
+  if (!settings) return false;
+
+  // Check for mcpServers.parallel-cc
+  const mcpServers = (settings as Record<string, unknown>).mcpServers as Record<string, McpServerConfig> | undefined;
+  if (!mcpServers || !mcpServers['parallel-cc']) {
+    return false;
+  }
+
+  // Verify it has the correct command
+  const config = mcpServers['parallel-cc'];
+  return config.command === 'parallel-cc' && Array.isArray(config.args);
+}
+
+/**
+ * Merge MCP server config into settings
+ */
+export function mergeMcpServerIntoSettings(
+  settings: ClaudeSettings | null,
+  config: McpServerConfig
+): ClaudeSettings {
+  const merged = { ...(settings || {}) };
+
+  // Ensure mcpServers exists
+  const mcpServers = (merged as Record<string, unknown>).mcpServers as Record<string, McpServerConfig> || {};
+  mcpServers['parallel-cc'] = config;
+  (merged as Record<string, unknown>).mcpServers = mcpServers;
+
+  return merged;
+}
+
+/**
+ * Install MCP server configuration to global Claude settings
+ */
+export function installMcpServer(options: { dryRun?: boolean } = {}): InstallMcpResult {
+  const settingsPath = getGlobalSettingsPath();
+
+  const result: InstallMcpResult = {
+    success: false,
+    settingsPath,
+    created: false,
+    merged: false,
+    alreadyInstalled: false
+  };
+
+  try {
+    // Read existing settings
+    const existingSettings = readSettings(settingsPath);
+
+    // Check if already installed
+    if (isMcpServerInstalled(existingSettings)) {
+      result.success = true;
+      result.alreadyInstalled = true;
+      return result;
+    }
+
+    // Create MCP config
+    const mcpConfig = createMcpServerConfig();
+
+    // Merge into settings
+    const mergedSettings = mergeMcpServerIntoSettings(existingSettings, mcpConfig);
+
+    // Write settings (unless dry run)
+    if (!options.dryRun) {
+      writeSettings(settingsPath, mergedSettings);
+    }
+
+    result.success = true;
+    result.created = existingSettings === null;
+    result.merged = existingSettings !== null;
+
+    return result;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : 'Unknown error';
+    return result;
+  }
+}
+
+/**
+ * Uninstall MCP server configuration from global Claude settings
+ */
+export function uninstallMcpServer(): InstallMcpResult {
+  const settingsPath = getGlobalSettingsPath();
+
+  const result: InstallMcpResult = {
+    success: false,
+    settingsPath,
+    created: false,
+    merged: false,
+    alreadyInstalled: false
+  };
+
+  try {
+    const existingSettings = readSettings(settingsPath);
+
+    if (!existingSettings) {
+      result.success = true;
+      return result;
+    }
+
+    // Remove parallel-cc from mcpServers
+    const mcpServers = (existingSettings as Record<string, unknown>).mcpServers as Record<string, McpServerConfig> | undefined;
+    if (mcpServers && mcpServers['parallel-cc']) {
+      delete mcpServers['parallel-cc'];
+      if (Object.keys(mcpServers).length === 0) {
+        delete (existingSettings as Record<string, unknown>).mcpServers;
+      }
+      writeSettings(settingsPath, existingSettings);
+    }
+
+    result.success = true;
+    return result;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : 'Unknown error';
+    return result;
+  }
+}
+
+/**
+ * Check MCP server installation status
+ */
+export function checkMcpStatus(): {
+  installed: boolean;
+  settingsPath: string;
+} {
+  const settingsPath = getGlobalSettingsPath();
+  const settings = readSettings(settingsPath);
+
+  return {
+    installed: isMcpServerInstalled(settings),
+    settingsPath
   };
 }

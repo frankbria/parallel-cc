@@ -39,8 +39,12 @@ RESULT=$(parallel-cc register --repo "$REPO_PATH" --pid $$ --json 2>/dev/null ||
 
 # Parse JSON results - ensure clean integers/strings
 WORKTREE_PATH=$(echo "$RESULT" | jq -r '.worktreePath // empty' 2>/dev/null | tr -d '\n' || true)
+SESSION_ID=$(echo "$RESULT" | jq -r '.sessionId // empty' 2>/dev/null | tr -d '\n' || true)
 IS_NEW=$(echo "$RESULT" | jq -r '.isNew // false' 2>/dev/null | tr -d '\n' || echo "false")
 PARALLEL_COUNT=$(echo "$RESULT" | jq -r '.parallelSessions // 1' 2>/dev/null | tr -d '\n' || echo "1")
+
+# Export session ID for MCP server to use (v0.3)
+export PARALLEL_CC_SESSION_ID="$SESSION_ID"
 
 # Ensure PARALLEL_COUNT is a valid integer, default to 1
 if ! [[ "$PARALLEL_COUNT" =~ ^[0-9]+$ ]]; then
