@@ -16,14 +16,39 @@ CREATED_DIRS=()
 
 # Helper function for colored output
 print() {
-    # Try to use chalk-based printer if available, fallback to plain text
-    if [ -f "$SCRIPT_DIR/print.mjs" ] && command -v node &> /dev/null; then
-        node "$SCRIPT_DIR/print.mjs" "$@"
-    else
-        # Fallback to plain text
-        shift
-        echo "$@"
+    local type="$1"
+    shift
+    local message="$@"
+
+    # Only try to use chalk-based printer if chalk is installed
+    # Check for chalk package existence to avoid import errors
+    if [ -d "$PROJECT_DIR/node_modules/chalk" ] && [ -f "$SCRIPT_DIR/print.mjs" ]; then
+        node "$SCRIPT_DIR/print.mjs" "$type" "$message"
+        return 0
     fi
+
+    # Fallback to plain text with basic formatting
+    case "$type" in
+        title)
+            echo ""
+            echo "=============================="
+            echo "  $message"
+            echo "=============================="
+            echo ""
+            ;;
+        error)
+            echo "✗ $message"
+            ;;
+        warning)
+            echo "⚠  $message"
+            ;;
+        info|check|success|step|install|build|verify|cleanup|folder)
+            echo "$message"
+            ;;
+        *)
+            echo "$message"
+            ;;
+    esac
 }
 
 # Cleanup function for rollback on failure
