@@ -124,35 +124,48 @@ echo ""
 print build "Building TypeScript..."
 cd "$PROJECT_DIR"
 
-# Install dependencies with progress feedback
-print step "Installing dependencies..."
-if ! npm install --silent > /tmp/parallel-cc-install.log 2>&1; then
-    print error "npm install failed. Check /tmp/parallel-cc-install.log for details"
-    cat /tmp/parallel-cc-install.log
-    exit 1
-fi
-
-# Verify node_modules was created
+# Install dependencies only if needed
 if [ ! -d "$PROJECT_DIR/node_modules" ]; then
-    print error "node_modules not created - npm install may have failed"
-    exit 1
-fi
-print check "Dependencies installed"
-
-# Build TypeScript
-print step "Compiling TypeScript..."
-if ! npm run build --silent > /tmp/parallel-cc-build.log 2>&1; then
-    print error "Build failed. Check /tmp/parallel-cc-build.log for details"
-    cat /tmp/parallel-cc-build.log
-    exit 1
+    print step "Installing dependencies..."
+    if ! npm install --silent > /tmp/parallel-cc-install.log 2>&1; then
+        print error "npm install failed. Check /tmp/parallel-cc-install.log for details"
+        cat /tmp/parallel-cc-install.log
+        exit 1
+    fi
+    print check "Dependencies installed"
+else
+    print check "Dependencies already installed"
 fi
 
-# Verify dist/cli.js was created
+# Build TypeScript only if needed or forced
+NEEDS_BUILD=false
 if [ ! -f "$PROJECT_DIR/dist/cli.js" ]; then
-    print error "dist/cli.js not created - build may have failed"
+    NEEDS_BUILD=true
+elif [ "$IS_UPDATE" = true ]; then
+    # On update, always rebuild
+    NEEDS_BUILD=true
+elif [ "$PROJECT_DIR/src" -nt "$PROJECT_DIR/dist/cli.js" ]; then
+    # Rebuild if source is newer than output
+    NEEDS_BUILD=true
+fi
+
+if [ "$NEEDS_BUILD" = true ]; then
+    print step "Compiling TypeScript..."
+    if ! npm run build --silent > /tmp/parallel-cc-build.log 2>&1; then
+        print error "Build failed. Check /tmp/parallel-cc-build.log for details"
+        cat /tmp/parallel-cc-build.log
+        exit 1
+    fi
+    print check "Build successful"
+else
+    print check "Build up to date"
+fi
+
+# Final verification that dist/cli.js exists
+if [ ! -f "$PROJECT_DIR/dist/cli.js" ]; then
+    print error "dist/cli.js not found - build may have failed"
     exit 1
 fi
-print check "Build successful"
 echo ""
 
 print folder "Creating directories..."
@@ -173,14 +186,17 @@ echo ""
 # Create symlink for CLI with warning if exists
 print install "Installing CLI..."
 CLI_TARGET="$INSTALL_DIR/parallel-cc"
-if [ -f "$CLI_TARGET" ] && [ ! -L "$CLI_TARGET" ]; then
+if [ -f "$CLI_TARGET" ] && [ ! -L "$CLI_TARGET" ] && [ ! "$IS_UPDATE" = true ]; then
+    # Only backup non-symlink files on first install
     print warning "Warning: $CLI_TARGET exists and is not a symlink"
     print step "Backing up to ${CLI_TARGET}.backup"
     mv "$CLI_TARGET" "${CLI_TARGET}.backup"
 fi
 ln -sf "$PROJECT_DIR/dist/cli.js" "$CLI_TARGET"
 chmod +x "$CLI_TARGET"
-INSTALLED_FILES+=("$CLI_TARGET")
+if [ ! "$IS_UPDATE" = true ]; then
+    INSTALLED_FILES+=("$CLI_TARGET")
+fi
 print check "parallel-cc CLI installed"
 
 # Install wrapper script
@@ -190,14 +206,20 @@ if [ ! -f "$SCRIPT_DIR/claude-parallel.sh" ]; then
     print error "claude-parallel.sh not found in $SCRIPT_DIR"
     exit 1
 fi
+# Only backup if not already installed and not an update
 if [ -f "$WRAPPER_TARGET" ] && [ ! "$IS_UPDATE" = true ]; then
-    print warning "Warning: $WRAPPER_TARGET exists"
-    print step "Backing up to ${WRAPPER_TARGET}.backup"
-    mv "$WRAPPER_TARGET" "${WRAPPER_TARGET}.backup"
+    # Check if it's already our file by comparing content
+    if ! cmp -s "$SCRIPT_DIR/claude-parallel.sh" "$WRAPPER_TARGET"; then
+        print warning "Warning: $WRAPPER_TARGET exists and differs"
+        print step "Backing up to ${WRAPPER_TARGET}.backup"
+        mv "$WRAPPER_TARGET" "${WRAPPER_TARGET}.backup"
+    fi
 fi
 cp "$SCRIPT_DIR/claude-parallel.sh" "$WRAPPER_TARGET"
 chmod +x "$WRAPPER_TARGET"
-INSTALLED_FILES+=("$WRAPPER_TARGET")
+if [ ! "$IS_UPDATE" = true ]; then
+    INSTALLED_FILES+=("$WRAPPER_TARGET")
+fi
 print check "claude-parallel wrapper installed"
 
 # Install heartbeat script (still useful for stale detection)
@@ -206,14 +228,20 @@ HEARTBEAT_TARGET="$INSTALL_DIR/parallel-cc-heartbeat.sh"
 if [ ! -f "$SCRIPT_DIR/heartbeat.sh" ]; then
     print warning "Warning: heartbeat.sh not found - skipping"
 else
+    # Only backup if not already installed and not an update
     if [ -f "$HEARTBEAT_TARGET" ] && [ ! "$IS_UPDATE" = true ]; then
-        print warning "Warning: $HEARTBEAT_TARGET exists"
-        print step "Backing up to ${HEARTBEAT_TARGET}.backup"
-        mv "$HEARTBEAT_TARGET" "${HEARTBEAT_TARGET}.backup"
+        # Check if it's already our file by comparing content
+        if ! cmp -s "$SCRIPT_DIR/heartbeat.sh" "$HEARTBEAT_TARGET"; then
+            print warning "Warning: $HEARTBEAT_TARGET exists and differs"
+            print step "Backing up to ${HEARTBEAT_TARGET}.backup"
+            mv "$HEARTBEAT_TARGET" "${HEARTBEAT_TARGET}.backup"
+        fi
     fi
     cp "$SCRIPT_DIR/heartbeat.sh" "$HEARTBEAT_TARGET"
     chmod +x "$HEARTBEAT_TARGET"
-    INSTALLED_FILES+=("$HEARTBEAT_TARGET")
+    if [ ! "$IS_UPDATE" = true ]; then
+        INSTALLED_FILES+=("$HEARTBEAT_TARGET")
+    fi
     print check "heartbeat hook installed"
 fi
 echo ""
