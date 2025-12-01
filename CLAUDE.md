@@ -4,7 +4,7 @@
 
 `parallel-cc` is a coordinator for running multiple Claude Code sessions in parallel on the same repository. It uses git worktrees to isolate each session's work.
 
-**Current Version:** 0.3.0
+**Current Version:** 0.4.0
 
 ## Architecture
 
@@ -29,13 +29,17 @@
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  MCP Server (v0.3)                                          │
+│  MCP Server (v0.4)                                          │
 │  ─────────────────                                          │
 │  parallel-cc mcp-serve (stdio transport)                    │
 │       │                                                      │
 │       ├──► get_parallel_status - query active sessions      │
 │       ├──► get_my_session - current session info            │
-│       └──► notify_when_merged - branch watch (stub)         │
+│       ├──► notify_when_merged - subscribe to merge events   │
+│       ├──► check_merge_status - check if branch merged      │
+│       ├──► check_conflicts - preview rebase conflicts       │
+│       ├──► rebase_assist - help with rebasing               │
+│       └──► get_merge_events - list merge history            │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
@@ -55,10 +59,22 @@
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
+│  Merge Detection Daemon (v0.4)                              │
+│  ─────────────────────────────                              │
+│  parallel-cc watch-merges                                   │
+│       │                                                      │
+│       ├──► Polls git for merged branches                    │
+│       ├──► Records merge events in SQLite                   │
+│       └──► Notifies subscribed sessions                     │
+│                                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
 │  Data Layer                                                  │
 │  ──────────                                                  │
 │  ~/.parallel-cc/coordinator.db (SQLite)                     │
 │       ├── sessions table (PID, repo, worktree, heartbeat)   │
+│       ├── merge_events table (v0.4 - detected merges)       │
+│       ├── subscriptions table (v0.4 - merge watchers)       │
 │       └── indexes for fast lookup                           │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
@@ -74,8 +90,9 @@ src/
 ├── gtr.ts             # Wrapper for gtr CLI commands (v1.x and v2.x)
 ├── hooks-installer.ts # Hook + alias + MCP configuration
 ├── logger.ts          # Logging utilities
+├── merge-detector.ts  # Merge detection polling logic (v0.4)
 ├── types.ts           # TypeScript type definitions
-└── mcp/               # MCP server module (v0.3)
+└── mcp/               # MCP server module (v0.4)
     ├── index.ts       # Server setup and tool registration
     ├── tools.ts       # Tool implementations
     └── schemas.ts     # Zod schemas for inputs/outputs
@@ -91,7 +108,8 @@ tests/
 ├── coordinator.test.ts     # Coordinator tests (37 tests)
 ├── gtr.test.ts             # GtrWrapper tests (49 tests)
 ├── hooks-installer.test.ts # Hook installer tests (76 tests)
-└── mcp.test.ts             # MCP tools tests (50 tests)
+├── mcp.test.ts             # MCP tools tests (65 tests)
+└── merge-detector.test.ts  # Merge detection tests (21 tests)
 
 vitest.config.ts  # Test framework configuration (project root)
 ```
@@ -104,7 +122,8 @@ vitest.config.ts  # Test framework configuration (project root)
 4. **Heartbeats** - Optional PostToolUse hook updates timestamps for stale detection
 5. **Auto-cleanup** - Dead sessions and their worktrees are cleaned up automatically
 6. **Hook Installer** - CLI tool to configure Claude Code settings for heartbeat integration
-7. **MCP Server** - Exposes tools for Claude to query session status (v0.3)
+7. **MCP Server** - Exposes tools for Claude to query session status and merge info (v0.4)
+8. **Merge Detection** - Polls git to detect when branches are merged, notifies subscribers (v0.4)
 
 ## Development Commands
 
@@ -122,12 +141,13 @@ npm test -- --coverage  # Run tests with coverage report
 **Framework:** Vitest 2.1.x with v8 coverage
 
 **Current Status:**
-- 267 tests, 100% passing
-- Overall coverage: >85%
-- db.ts: 98%+ coverage
-- coordinator.ts: 100% coverage
-- gtr.ts: 100% coverage
-- hooks-installer.ts: 86%+ coverage
+- 303 tests, 100% passing
+- Key file coverage:
+  - merge-detector.ts: 87%+ coverage
+  - db.ts: 83%+ coverage
+  - coordinator.ts: 67%+ coverage
+  - gtr.ts: 100% coverage
+  - mcp/tools.ts: 60%+ coverage (100% function coverage)
 
 **Running Tests:**
 ```bash
@@ -165,6 +185,7 @@ node dist/cli.js mcp-serve  # Start MCP server (stdio)
 SQLite database at `~/.parallel-cc/coordinator.db`:
 
 ```sql
+-- Sessions table (core)
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY,
   pid INTEGER NOT NULL,
@@ -176,9 +197,39 @@ CREATE TABLE sessions (
   last_heartbeat TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Merge events table (v0.4)
+CREATE TABLE merge_events (
+  id TEXT PRIMARY KEY,
+  repo_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  source_commit TEXT NOT NULL,
+  target_branch TEXT NOT NULL DEFAULT 'main',
+  target_commit TEXT NOT NULL,
+  merged_at TEXT NOT NULL DEFAULT (datetime('now')),
+  detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+  notification_sent INTEGER NOT NULL DEFAULT 0
+);
+
+-- Subscriptions table (v0.4)
+CREATE TABLE subscriptions (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  target_branch TEXT NOT NULL DEFAULT 'main',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  notified_at TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
 CREATE INDEX idx_sessions_repo ON sessions(repo_path);
 CREATE INDEX idx_sessions_pid ON sessions(pid);
 CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
+CREATE INDEX idx_merge_events_repo ON merge_events(repo_path);
+CREATE INDEX idx_merge_events_branch ON merge_events(branch_name);
+CREATE INDEX idx_subscriptions_session ON subscriptions(session_id);
+CREATE INDEX idx_subscriptions_active ON subscriptions(is_active);
 ```
 
 ## CLI Commands
@@ -192,6 +243,10 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
 | `mcp-serve` | Start MCP server (stdio transport) |
+| `watch-merges` | Start merge detection daemon (v0.4) |
+| `watch-merges --once` | Run single merge detection poll (v0.4) |
+| `merge-status` | Show merge events history (v0.4) |
+| `merge-status --subscriptions` | Show active merge subscriptions (v0.4) |
 | `install --all` | Install hooks globally + alias + MCP |
 | `install --interactive` | Prompted installation for all options |
 | `install --hooks` | Install heartbeat hooks (interactive) |
@@ -202,9 +257,9 @@ CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
 | `install --uninstall` | Remove installed hooks/alias/MCP |
 | `install --status` | Check installation status |
 
-## MCP Server Tools (v0.3)
+## MCP Server Tools (v0.4)
 
-The MCP server exposes three tools for Claude Code to query:
+The MCP server exposes seven tools for Claude Code to query:
 
 ### `get_parallel_status`
 Returns info about all active sessions in the current repo.
@@ -219,11 +274,39 @@ Returns info about the current session (requires PARALLEL_CC_SESSION_ID env var)
 // Output: { sessionId, worktreePath, worktreeName, isMainRepo, startedAt, parallelSessions }
 ```
 
-### `notify_when_merged`
-Subscribe to notifications when a branch is merged (stub in v0.3, full implementation in v0.4).
+### `notify_when_merged` (v0.4)
+Subscribe to notifications when a branch is merged to the target branch.
+```typescript
+// Input: { branch: string, targetBranch?: string }
+// Output: { subscribed: boolean, message: string }
+```
+
+### `check_merge_status` (v0.4)
+Check if a branch has been merged to the target branch.
 ```typescript
 // Input: { branch: string }
-// Output: { subscribed: boolean, message: string }
+// Output: { isMerged: boolean, mergeEvent?: MergeEventInfo, message: string }
+```
+
+### `check_conflicts` (v0.4)
+Check for merge/rebase conflicts between branches.
+```typescript
+// Input: { currentBranch: string, targetBranch: string }
+// Output: { hasConflicts: boolean, conflictingFiles: string[], summary: string, guidance?: string[] }
+```
+
+### `rebase_assist` (v0.4)
+Assist with rebasing current branch onto a target branch.
+```typescript
+// Input: { targetBranch: string, checkOnly?: boolean }
+// Output: { success: boolean, output: string, hasConflicts: boolean, conflictingFiles: string[], conflictSummary: string }
+```
+
+### `get_merge_events` (v0.4)
+Get history of detected merge events for a repository.
+```typescript
+// Input: { repo_path?: string, limit?: number }
+// Output: { events: MergeEventInfo[], total: number }
 ```
 
 ## Integration Flow
@@ -248,9 +331,9 @@ Subscribe to notifications when a branch is merged (stub in v0.3, full implement
 | v0.2 | ✅ Complete | CLI, SQLite, wrapper script |
 | v0.2.1 | ✅ Complete | Hook installer CLI, Vitest testing |
 | v0.2.4 | ✅ Complete | Shell alias setup, full install command |
-| v0.3 | ✅ Current | MCP server, >85% test coverage |
-| v0.4 | Planned | Branch merge detection |
-| v0.5 | Planned | File-level conflict detection |
+| v0.3 | ✅ Complete | MCP server, >85% test coverage |
+| v0.4 | ✅ Current | Branch merge detection, rebase assistance, conflict checking |
+| v0.5 | Planned | Advanced conflict resolution, merge conflict auto-fix suggestions |
 | v1.0 | Planned | E2B sandbox integration |
 
 ## Coding Standards

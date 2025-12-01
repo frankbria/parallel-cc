@@ -12,7 +12,9 @@ import type {
   StatusResult,
   SessionInfo,
   CleanupResult,
-  Config
+  Config,
+  MergeEvent,
+  Subscription
 } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
 
@@ -187,10 +189,21 @@ export class Coordinator {
     const staleSessions = this.db.getStaleSessions(this.config.staleThresholdMinutes);
     const removedSessions: string[] = [];
     const worktreesRemoved: string[] = [];
-    
+
     for (const session of staleSessions) {
       // Double-check process is actually dead
       if (!this.isProcessAlive(session.pid)) {
+        // Deactivate subscriptions for removed session
+        try {
+          const subscriptions = this.db.getSubscriptionsBySession(session.id);
+          for (const sub of subscriptions) {
+            this.db.deactivateSubscription(sub.id);
+            logger.info(`Cleanup: Deactivated subscription ${sub.id} for stale session ${session.id}`);
+          }
+        } catch (error) {
+          logger.error(`Cleanup: Failed to deactivate subscriptions for session ${session.id}: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
+
         // Remove worktree if applicable
         if (!session.is_main_repo && session.worktree_name && this.config.autoCleanupWorktrees) {
           const gtr = new GtrWrapper(session.repo_path);
@@ -202,17 +215,145 @@ export class Coordinator {
             logger.error(`Cleanup: Failed to remove worktree ${session.worktree_name}: ${result.error}`);
           }
         }
-        
+
         this.db.deleteSession(session.id);
         removedSessions.push(session.id);
       }
     }
-    
+
     return {
       removed: removedSessions.length,
       sessions: removedSessions,
       worktreesRemoved
     };
+  }
+
+  /**
+   * Subscribe a session to receive notifications when a branch is merged
+   * @param sessionId - Session ID to subscribe
+   * @param branchName - Branch name to watch
+   * @param targetBranch - Target branch (defaults to 'main')
+   * @returns Subscription result with ID and status
+   */
+  subscribeToMerge(
+    sessionId: string,
+    branchName: string,
+    targetBranch: string = 'main'
+  ): { subscriptionId: string; success: boolean; message: string } {
+    try {
+      // Validate session exists
+      const session = this.db.getSessionById(sessionId);
+      if (!session) {
+        return {
+          subscriptionId: '',
+          success: false,
+          message: `Session ${sessionId} not found`
+        };
+      }
+
+      // Create subscription
+      const subscriptionId = randomUUID();
+      this.db.createSubscription({
+        id: subscriptionId,
+        session_id: sessionId,
+        repo_path: session.repo_path,
+        branch_name: branchName,
+        target_branch: targetBranch,
+        is_active: true
+      });
+
+      logger.info(`Created merge subscription ${subscriptionId} for session ${sessionId}: ${branchName} -> ${targetBranch}`);
+
+      return {
+        subscriptionId,
+        success: true,
+        message: `Subscribed to merge notifications for ${branchName} -> ${targetBranch}`
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'unknown error';
+      logger.error(`Failed to create merge subscription: ${errorMsg}`);
+      return {
+        subscriptionId: '',
+        success: false,
+        message: `Failed to create subscription: ${errorMsg}`
+      };
+    }
+  }
+
+  /**
+   * Unsubscribe from a merge notification
+   * @param subscriptionId - Subscription ID to deactivate
+   * @returns Success status
+   */
+  unsubscribeFromMerge(subscriptionId: string): boolean {
+    try {
+      const success = this.db.deactivateSubscription(subscriptionId);
+      if (success) {
+        logger.info(`Deactivated subscription ${subscriptionId}`);
+      }
+      return success;
+    } catch (error) {
+      logger.error(`Failed to deactivate subscription ${subscriptionId}: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get active subscriptions for a session
+   * @param sessionId - Session ID to query
+   * @returns Array of active subscriptions
+   */
+  getSessionSubscriptions(sessionId: string): Subscription[] {
+    try {
+      return this.db.getSubscriptionsBySession(sessionId);
+    } catch (error) {
+      logger.error(`Failed to get subscriptions for session ${sessionId}: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return [];
+    }
+  }
+
+  /**
+   * Check if a branch has been merged
+   * @param repoPath - Repository path
+   * @param branchName - Branch name to check
+   * @param targetBranch - Target branch (defaults to 'main')
+   * @returns Merge status and event details if merged
+   */
+  getBranchMergeStatus(
+    repoPath: string,
+    branchName: string,
+    targetBranch: string = 'main'
+  ): { isMerged: boolean; mergeEvent: MergeEvent | null } {
+    try {
+      const normalizedRepo = this.normalizeRepoPath(repoPath);
+      const mergeEvent = this.db.getMergeEvent(normalizedRepo, branchName, targetBranch);
+
+      return {
+        isMerged: mergeEvent !== null,
+        mergeEvent
+      };
+    } catch (error) {
+      logger.error(`Failed to check merge status for ${branchName}: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return { isMerged: false, mergeEvent: null };
+    }
+  }
+
+  /**
+   * Get merge events, optionally filtered by repository
+   * @param repoPath - Optional repository path to filter by
+   * @returns Array of merge events
+   */
+  getMergeEvents(repoPath?: string): MergeEvent[] {
+    try {
+      if (repoPath) {
+        const normalizedRepo = this.normalizeRepoPath(repoPath);
+        return this.db.getMergeEventsByRepo(normalizedRepo);
+      }
+      return this.db.getAllMergeEvents();
+    } catch (error) {
+      logger.error(`Failed to get merge events: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return [];
+    }
   }
   
   private cleanupStaleSessions(): void {

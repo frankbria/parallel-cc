@@ -1,0 +1,401 @@
+# v0.4 Merge Detection - Detailed Data Flow Diagram
+
+================================================================================
+FLOW 1: SUBSCRIPTION (Claude → MCP → Database)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  User: "Watch for when feature-auth merges"                             │
+│  Claude: notify_when_merged({branch: "feature-auth"})                   │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ MCP call (stdio transport)
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ MCP Server (parallel-cc mcp-serve)                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Tool Handler: notifyWhenMerged()                                       │
+│    ├─ Get sessionId from env: PARALLEL_CC_SESSION_ID                   │
+│    ├─ Get repoPath from cwd or session record                          │
+│    └─ Call: MergeDB.createSubscription(sessionId, branch, repoPath)    │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SQLite Database (~/.parallel-cc/coordinator.db)                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  INSERT INTO branch_subscriptions                                       │
+│    (session_id, branch, repo_path)                                      │
+│  VALUES                                                                  │
+│    ('uuid-abc', 'feature-auth', '/path/to/repo')                        │
+│  ON CONFLICT (session_id, branch) DO NOTHING                            │
+│                                                                          │
+│  Result: New row created                                                │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 │ Return to MCP
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Tool result:                                                            │
+│  {                                                                       │
+│    subscribed: true,                                                    │
+│    message: "Subscribed to merge notifications for 'feature-auth'",    │
+│    watcherRunning: true                                                 │
+│  }                                                                       │
+│                                                                          │
+│  Claude: "I'm now watching for when feature-auth merges."               │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+FLOW 2: MERGE DETECTION (Background Daemon → Git → Database)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Terminal: parallel-cc watch-merges                                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  $ parallel-cc watch-merges --interval 30 --target main                 │
+│  Starting merge detector (polling every 30s)...                         │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ Every 30 seconds
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ MergeDetector.detectMerges()                                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. Get all active sessions from SessionDB                              │
+│     └─ Extract unique repo_paths: ['/path/to/repo1', '/path/to/repo2'] │
+│                                                                          │
+│  2. For each repo_path:                                                 │
+│     ├─ git fetch origin --prune                                         │
+│     │                                                                    │
+│     ├─ getBranchesToWatch(repoPath)                                     │
+│     │  ├─ Get worktree branches from sessions                          │
+│     │  │  (e.g., "feature-auth" from parallel-feature-auth worktree)   │
+│     │  └─ Get subscribed branches from branch_subscriptions            │
+│     │     Result: ["feature-auth", "feature-payments", ...]            │
+│     │                                                                    │
+│     └─ For each branch:                                                 │
+│        ├─ checkBranch(repoPath, branch)                                 │
+│        │  │                                                              │
+│        │  ├─ Check if already recorded in merge_events                 │
+│        │  │  └─ If yes: skip (already detected)                        │
+│        │  │                                                              │
+│        │  ├─ isBranchMerged(repoPath, branch, 'main')                  │
+│        │  │  └─ git merge-base --is-ancestor branch origin/main        │
+│        │  │     Exit code 0 = merged ✓                                 │
+│        │  │                                                              │
+│        │  ├─ getMergeCommitSha(repoPath, branch)                       │
+│        │  │  └─ git log --merges --first-parent origin/main            │
+│        │  │     --grep="Merge.*feature-auth" -1                        │
+│        │  │     Returns: "a1b2c3d4e5f6..."                             │
+│        │  │                                                              │
+│        │  └─ getMergeTimestamp(repoPath, branch, sha)                  │
+│        │     └─ git show -s --format=%ct a1b2c3d4                       │
+│        │        Returns: 1733054400 (Unix timestamp)                   │
+│        │                                                                 │
+│        └─ If merged: Create merge event and notifications               │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SQLite Database Transaction                                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  BEGIN TRANSACTION;                                                     │
+│                                                                          │
+│  -- Step 1: Create merge event                                          │
+│  INSERT INTO merge_events                                               │
+│    (id, repo_path, branch, merged_at, merged_into, merge_commit_sha)   │
+│  VALUES                                                                  │
+│    ('merge-uuid-123',                                                   │
+│     '/path/to/repo',                                                    │
+│     'feature-auth',                                                     │
+│     '2025-12-01T10:00:00Z',                                             │
+│     'main',                                                             │
+│     'a1b2c3d4e5f6...');                                                 │
+│                                                                          │
+│  -- Step 2: Get all sessions subscribed to this branch                  │
+│  SELECT session_id                                                      │
+│  FROM branch_subscriptions                                              │
+│  WHERE branch = 'feature-auth'                                          │
+│    AND repo_path = '/path/to/repo';                                    │
+│  -- Returns: ['session-uuid-abc', 'session-uuid-def']                  │
+│                                                                          │
+│  -- Step 3: Create notifications for each subscribed session            │
+│  INSERT INTO merge_notifications                                        │
+│    (merge_event_id, session_id)                                         │
+│  VALUES                                                                  │
+│    ('merge-uuid-123', 'session-uuid-abc'),                              │
+│    ('merge-uuid-123', 'session-uuid-def');                              │
+│                                                                          │
+│  COMMIT;                                                                │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Terminal Output (Detector Logs)                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  [2025-12-01T10:00:05Z] Detected 1 merge(s):                            │
+│    • feature-auth -> main (a1b2c3d)                                     │
+│                                                                          │
+│  Created notifications for 2 session(s)                                 │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+FLOW 3: NOTIFICATION DELIVERY (PostToolUse Hook → Database → Claude)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session (subscribed session)                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Claude executes ANY tool (e.g., Read, Edit, Bash, etc.)                │
+│    └─ Tool completes successfully                                       │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ Triggers PostToolUse hook
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Hook: ~/.local/bin/parallel-cc-heartbeat.sh                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  #!/bin/bash                                                             │
+│  PID=$$                                                                  │
+│                                                                          │
+│  # Update session heartbeat                                             │
+│  parallel-cc heartbeat --pid $PID                                       │
+│                                                                          │
+│  # NEW IN v0.4: Check for merge notifications                           │
+│  if [ -n "$PARALLEL_CC_SESSION_ID" ]; then                              │
+│    parallel-cc check-notifications                                      │
+│  fi                                                                      │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ CLI Command: parallel-cc check-notifications                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. Get sessionId from $PARALLEL_CC_SESSION_ID                          │
+│     └─ sessionId = "session-uuid-abc"                                   │
+│                                                                          │
+│  2. Query: MergeDB.getUnacknowledgedNotifications(sessionId)            │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SQLite Query                                                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  SELECT                                                                  │
+│    mn.*,                                                                 │
+│    me.branch,                                                            │
+│    me.merged_at,                                                         │
+│    me.merged_into                                                        │
+│  FROM merge_notifications mn                                            │
+│  JOIN merge_events me ON mn.merge_event_id = me.id                     │
+│  WHERE mn.session_id = 'session-uuid-abc'                               │
+│    AND mn.acknowledged = 0                                              │
+│  ORDER BY me.merged_at DESC;                                            │
+│                                                                          │
+│  Result:                                                                 │
+│  [                                                                       │
+│    {                                                                     │
+│      branch: "feature-auth",                                            │
+│      merged_at: "2025-12-01T10:00:00Z",                                 │
+│      merged_into: "main"                                                │
+│    }                                                                     │
+│  ]                                                                       │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Hook Output (stdout → captured by Claude)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ⚠️  Merge notifications:                                               │
+│    • Branch 'feature-auth' was merged to main 5 minutes ago            │
+│    Consider rebasing your work with: git rebase origin/main            │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ Hook stdout visible to Claude
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  [Tool execution completed]                                              │
+│  [Hook output]:                                                          │
+│    ⚠️  Branch 'feature-auth' was merged to main 5 minutes ago          │
+│                                                                          │
+│  Claude (sees warning, proactively responds):                           │
+│  "I noticed that the 'feature-auth' branch was merged to main           │
+│   5 minutes ago. Would you like me to rebase your current work          │
+│   onto the latest main branch to stay up to date?"                      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+FLOW 4: ACKNOWLEDGMENT (Claude → MCP → Database)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  User: "Yes, rebase my work"                                             │
+│  Claude:                                                                 │
+│    1. Executes: git fetch && git rebase origin/main                     │
+│    2. Calls: acknowledge_merge({merge_event_id: "merge-uuid-123"})     │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ MCP call
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ MCP Server                                                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Tool Handler: acknowledgeMerge()                                       │
+│    ├─ Get sessionId from env                                            │
+│    └─ Call: MergeDB.acknowledgeNotification(mergeEventId, sessionId)   │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SQLite Update                                                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  UPDATE merge_notifications                                             │
+│  SET acknowledged = 1,                                                  │
+│      acknowledged_at = datetime('now')                                  │
+│  WHERE merge_event_id = 'merge-uuid-123'                                │
+│    AND session_id = 'session-uuid-abc';                                │
+│                                                                          │
+│  Rows affected: 1                                                        │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Result: Future heartbeat checks will NOT include this notification      │
+│         (acknowledged = 1 filtered out by query)                        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+FLOW 5: MANUAL STATUS CHECK (Claude → MCP → Database → Git)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  User: "What's the merge status of feature-payments?"                   │
+│  Claude: get_merge_status({branch: "feature-payments"})                 │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │ MCP call
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ MCP Tool: getMergeStatus()                                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. Get repoPath from cwd                                               │
+│  2. git fetch origin                                                     │
+│  3. isBranchMerged(repoPath, "feature-payments", "main")               │
+│     └─ git merge-base --is-ancestor feature-payments origin/main       │
+│        Exit code: 1 (NOT merged)                                        │
+│                                                                          │
+│  4. Since not merged, calculate divergence:                             │
+│     ├─ behindBy = git rev-list --count feature-payments..origin/main   │
+│     │  Returns: 5 commits                                               │
+│     └─ divergedBy = git rev-list --count origin/main..feature-payments │
+│        Returns: 3 commits                                               │
+│                                                                          │
+│  5. Return status object                                                │
+│                                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Claude Code Session                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Tool result:                                                            │
+│  {                                                                       │
+│    isMerged: false,                                                     │
+│    needsRebase: true,                                                   │
+│    behindBy: 5,                                                         │
+│    divergedBy: 3                                                        │
+│  }                                                                       │
+│                                                                          │
+│  Claude: "The feature-payments branch is not yet merged. It's           │
+│           5 commits behind main and has diverged by 3 commits.          │
+│           You should rebase before merging."                            │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+DATABASE STATE AT VARIOUS POINTS
+================================================================================
+
+AFTER SUBSCRIPTION:
+┌─────────────────────────────────────────────────────────────────────────┐
+│ branch_subscriptions                                                     │
+├──────────────────┬────────────────┬─────────────────┬──────────────────┤
+│ session_id       │ branch         │ repo_path       │ created_at       │
+├──────────────────┼────────────────┼─────────────────┼──────────────────┤
+│ session-uuid-abc │ feature-auth   │ /path/to/repo   │ 2025-12-01T09:00 │
+└──────────────────┴────────────────┴─────────────────┴──────────────────┘
+
+AFTER MERGE DETECTION:
+┌─────────────────────────────────────────────────────────────────────────┐
+│ merge_events                                                             │
+├──────────────┬─────────────┬──────────────┬─────────────┬──────────────┤
+│ id           │ branch      │ merged_at    │ merged_into │ merge_commit │
+├──────────────┼─────────────┼──────────────┼─────────────┼──────────────┤
+│ merge-uuid-1 │ feature-auth│ 2025-12-01.. │ main        │ a1b2c3d4...  │
+└──────────────┴─────────────┴──────────────┴─────────────┴──────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ merge_notifications                                                      │
+├──────────────────┬──────────────────┬─────────────┬──────────────────┬─┤
+│ merge_event_id   │ session_id       │ notified_at │ acknowledged     │ │
+├──────────────────┼──────────────────┼─────────────┼──────────────────┼─┤
+│ merge-uuid-1     │ session-uuid-abc │ 2025-12-01..│ 0 (false)        │ │
+└──────────────────┴──────────────────┴─────────────┴──────────────────┴─┘
+
+AFTER ACKNOWLEDGMENT:
+┌─────────────────────────────────────────────────────────────────────────┐
+│ merge_notifications                                                      │
+├──────────────────┬──────────────────┬─────────────┬─────────────┬──────┤
+│ merge_event_id   │ session_id       │ notified_at │ acknowledged│ ack..│
+├──────────────────┼──────────────────┼─────────────┼─────────────┼──────┤
+│ merge-uuid-1     │ session-uuid-abc │ 2025-12-01..│ 1 (true)    │ 10:05│
+└──────────────────┴──────────────────┴─────────────┴─────────────┴──────┘
+
