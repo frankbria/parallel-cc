@@ -769,7 +769,7 @@ describe('MCP Tools', () => {
       const result = await getMergeEvents({ limit: 10 });
 
       expect(result.events).toHaveLength(10);
-      expect(result.total).toBe(10);
+      expect(result.total).toBe(100); // total is actual count, not sliced count
     });
 
     it('should use repo_path when provided', async () => {

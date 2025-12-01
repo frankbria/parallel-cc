@@ -4,6 +4,19 @@
 
 import { Coordinator } from '../coordinator.js';
 import { execSync } from 'child_process';
+
+/**
+ * Validate that a string is a valid git ref name to prevent command injection
+ * Git ref names cannot contain: space, ~, ^, :, ?, *, [, \, control chars
+ * and cannot start with - or .
+ */
+function isValidGitRef(ref: string): boolean {
+  if (!ref || ref.length > 255) return false;
+  // Allow alphanumeric, dots, underscores, hyphens, and forward slashes
+  // Must start with alphanumeric
+  return /^[a-zA-Z0-9][a-zA-Z0-9._\/-]*$/.test(ref);
+}
+
 import type {
   GetParallelStatusInput,
   GetParallelStatusOutput,
@@ -215,7 +228,7 @@ export async function getMergeEvents(
         mergedAt: e.merged_at,
         detectedAt: e.detected_at
       })),
-      total: events.length
+      total: allEvents.length
     };
   } finally {
     coordinator.close();
@@ -230,6 +243,16 @@ export async function checkConflicts(
   input: CheckConflictsInput
 ): Promise<CheckConflictsOutput> {
   const repoPath = process.cwd();
+
+  // Validate branch names to prevent command injection
+  if (!isValidGitRef(input.currentBranch) || !isValidGitRef(input.targetBranch)) {
+    return {
+      hasConflicts: false,
+      conflictingFiles: [],
+      summary: 'Error: Invalid branch name format',
+      guidance: ['Branch names contain invalid characters']
+    };
+  }
 
   try {
     // Fetch latest refs
@@ -324,6 +347,18 @@ export async function rebaseAssist(
   input: RebaseAssistInput
 ): Promise<RebaseAssistOutput> {
   const repoPath = process.cwd();
+
+  // Validate target branch name to prevent command injection
+  if (!isValidGitRef(input.targetBranch)) {
+    return {
+      success: false,
+      output: '',
+      hasConflicts: false,
+      conflictingFiles: [],
+      conflictSummary: 'Error: Invalid target branch name format',
+      error: 'Target branch name contains invalid characters'
+    };
+  }
 
   try {
     // Fetch latest refs
