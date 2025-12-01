@@ -1,7 +1,8 @@
 /**
  * MCP Server for parallel-cc
  *
- * Exposes tools for Claude Code to query parallel session status.
+ * Exposes tools for Claude Code to query parallel session status
+ * and manage merge detection (v0.4).
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -12,12 +13,24 @@ import {
   GetMySessionInputSchema,
   GetMySessionOutputSchema,
   NotifyWhenMergedInputSchema,
-  NotifyWhenMergedOutputSchema
+  NotifyWhenMergedOutputSchema,
+  CheckMergeStatusInputSchema,
+  CheckMergeStatusOutputSchema,
+  CheckConflictsInputSchema,
+  CheckConflictsOutputSchema,
+  RebaseAssistInputSchema,
+  RebaseAssistOutputSchema,
+  GetMergeEventsInputSchema,
+  GetMergeEventsOutputSchema
 } from './schemas.js';
 import {
   getParallelStatus,
   getMySession,
-  notifyWhenMerged
+  notifyWhenMerged,
+  checkMergeStatus,
+  checkConflicts,
+  rebaseAssist,
+  getMergeEvents
 } from './tools.js';
 
 /**
@@ -26,7 +39,7 @@ import {
 export function createMcpServer(): McpServer {
   const server = new McpServer({
     name: 'parallel-cc',
-    version: '0.3.0'
+    version: '0.4.0'
   });
 
   // Register get_parallel_status tool
@@ -65,17 +78,89 @@ export function createMcpServer(): McpServer {
     }
   );
 
-  // Register notify_when_merged tool (stub for v0.3)
+  // Register notify_when_merged tool (v0.4 - full implementation)
   server.registerTool(
     'notify_when_merged',
     {
       title: 'Watch Branch for Merge',
-      description: 'Subscribe to be notified when a branch is merged to main. Note: This is a placeholder in v0.3. Full merge detection will be implemented in v0.4.',
+      description: 'Subscribe to be notified when a branch is merged to main. Creates a subscription that the merge detection daemon will check. Requires running in a parallel-cc managed session.',
       inputSchema: NotifyWhenMergedInputSchema,
       outputSchema: NotifyWhenMergedOutputSchema
     },
     async (input) => {
       const output = await notifyWhenMerged(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register check_merge_status tool (v0.4)
+  server.registerTool(
+    'check_merge_status',
+    {
+      title: 'Check Merge Status',
+      description: 'Check if a branch has been merged into the target branch (default: main). Returns merge event details if found.',
+      inputSchema: CheckMergeStatusInputSchema,
+      outputSchema: CheckMergeStatusOutputSchema
+    },
+    async (input) => {
+      const output = await checkMergeStatus(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register check_conflicts tool (v0.4)
+  server.registerTool(
+    'check_conflicts',
+    {
+      title: 'Check Conflicts',
+      description: 'Check for merge/rebase conflicts between branches before attempting to merge or rebase. Returns list of conflicting files and guidance.',
+      inputSchema: CheckConflictsInputSchema,
+      outputSchema: CheckConflictsOutputSchema
+    },
+    async (input) => {
+      const output = await checkConflicts(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register rebase_assist tool (v0.4)
+  server.registerTool(
+    'rebase_assist',
+    {
+      title: 'Rebase Assist',
+      description: 'Assist with rebasing current branch onto a target branch. Can check for conflicts only (checkOnly=true) or perform the actual rebase.',
+      inputSchema: RebaseAssistInputSchema,
+      outputSchema: RebaseAssistOutputSchema
+    },
+    async (input) => {
+      const output = await rebaseAssist(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register get_merge_events tool (v0.4)
+  server.registerTool(
+    'get_merge_events',
+    {
+      title: 'Get Merge Events',
+      description: 'Get history of detected merge events. Can be filtered by repository path and limited in count.',
+      inputSchema: GetMergeEventsInputSchema,
+      outputSchema: GetMergeEventsOutputSchema
+    },
+    async (input) => {
+      const output = await getMergeEvents(input);
       return {
         content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
         structuredContent: output
@@ -97,4 +182,12 @@ export async function startMcpServer(): Promise<void> {
 }
 
 // Export for testing
-export { getParallelStatus, getMySession, notifyWhenMerged };
+export {
+  getParallelStatus,
+  getMySession,
+  notifyWhenMerged,
+  checkMergeStatus,
+  checkConflicts,
+  rebaseAssist,
+  getMergeEvents
+};

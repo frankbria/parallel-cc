@@ -83,3 +83,106 @@ export const DEFAULT_CONFIG: Config = {
   autoCleanupWorktrees: true,
   worktreePrefix: 'parallel-'
 };
+
+// ============================================================================
+// Merge Detection Types (v0.4)
+// ============================================================================
+
+/**
+ * Database row for merge_events table
+ */
+export interface MergeEventRow {
+  id: string;
+  repo_path: string;
+  branch_name: string;
+  source_commit: string;
+  target_branch: string;
+  target_commit: string;
+  merged_at: string;
+  detected_at: string;
+  notification_sent: number; // SQLite boolean (0/1)
+}
+
+/**
+ * Merge event model (TypeScript booleans)
+ */
+export interface MergeEvent {
+  id: string;
+  repo_path: string;
+  branch_name: string;
+  source_commit: string;
+  target_branch: string;
+  target_commit: string;
+  merged_at: string;
+  detected_at: string;
+  notification_sent: boolean;
+}
+
+/**
+ * Database row for subscriptions table
+ */
+export interface SubscriptionRow {
+  id: string;
+  session_id: string;
+  repo_path: string;
+  branch_name: string;
+  target_branch: string;
+  created_at: string;
+  notified_at: string | null;
+  is_active: number; // SQLite boolean (0/1)
+}
+
+/**
+ * Subscription model (TypeScript booleans)
+ */
+export interface Subscription {
+  id: string;
+  session_id: string;
+  repo_path: string;
+  branch_name: string;
+  target_branch: string;
+  created_at: string;
+  notified_at: string | null;
+  is_active: boolean;
+}
+
+/**
+ * Result of merge detection poll
+ */
+export interface MergeDetectionResult {
+  newMerges: MergeEvent[];
+  notificationsSent: number;
+  subscriptionsChecked: number;
+  errors: string[];
+}
+
+/**
+ * Conflict detection result
+ */
+export interface ConflictInfo {
+  hasConflicts: boolean;
+  conflictingFiles: string[];
+  summary: string;
+}
+
+/**
+ * Rebase assistance result
+ */
+export interface RebaseResult {
+  success: boolean;
+  output: string;
+  conflicts?: ConflictInfo;
+  error?: string;
+}
+
+/**
+ * Branch status information
+ */
+export interface BranchStatus {
+  name: string;
+  commit: string;
+  upstreamBranch: string | null;
+  isMerged: boolean;
+  behindBy: number;
+  aheadBy: number;
+}

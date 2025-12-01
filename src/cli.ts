@@ -9,6 +9,8 @@ import { execSync } from 'child_process';
 import * as readline from 'readline';
 import { Coordinator } from './coordinator.js';
 import { GtrWrapper } from './gtr.js';
+import { MergeDetector } from './merge-detector.js';
+import { SessionDB } from './db.js';
 import { DEFAULT_CONFIG } from './types.js';
 import {
   installHooks,
@@ -29,7 +31,7 @@ import { startMcpServer } from './mcp/index.js';
 program
   .name('parallel-cc')
   .description('Coordinate parallel Claude Code sessions using git worktrees')
-  .version('0.3.0');
+  .version('0.4.0');
 
 /**
  * Helper to prompt user for input (for interactive mode)
@@ -674,6 +676,195 @@ program
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error(`MCP server failed: ${errorMessage}`);
       process.exit(1);
+    }
+  });
+
+/**
+ * Watch for merged branches (v0.4)
+ * Starts a background daemon that polls for merged branches and sends notifications
+ */
+program
+  .command('watch-merges')
+  .description('Start merge detection daemon to monitor for merged branches (v0.4)')
+  .option('--interval <seconds>', 'Poll interval in seconds', '60')
+  .option('--once', 'Run a single poll iteration and exit')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const db = new SessionDB();
+    const pollInterval = parseInt(options.interval, 10);
+
+    if (isNaN(pollInterval) || pollInterval < 5) {
+      console.error(chalk.red('Poll interval must be at least 5 seconds'));
+      process.exit(1);
+    }
+
+    const detector = new MergeDetector(db, {
+      pollIntervalSeconds: pollInterval
+    });
+
+    try {
+      if (options.once) {
+        // Single poll run
+        if (!options.json) {
+          console.log(chalk.bold('\nRunning single merge detection poll...\n'));
+        }
+
+        const result = await detector.pollForMerges();
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`Subscriptions checked: ${result.subscriptionsChecked}`);
+          console.log(`New merges detected: ${result.newMerges.length}`);
+          console.log(`Notifications sent: ${result.notificationsSent}`);
+
+          if (result.newMerges.length > 0) {
+            console.log(chalk.bold('\nNew Merges:'));
+            for (const merge of result.newMerges) {
+              console.log(`  ${chalk.green('●')} ${merge.branch_name} → ${merge.target_branch}`);
+              console.log(chalk.dim(`    Repo: ${merge.repo_path}`));
+              console.log(chalk.dim(`    Detected: ${merge.detected_at}`));
+            }
+          }
+
+          if (result.errors.length > 0) {
+            console.log(chalk.bold('\nErrors:'));
+            for (const err of result.errors) {
+              console.log(chalk.red(`  ✗ ${err}`));
+            }
+          }
+          console.log('');
+        }
+      } else {
+        // Continuous polling daemon
+        console.log(chalk.bold('\nStarting merge detection daemon...\n'));
+        console.log(chalk.dim(`  Poll interval: ${pollInterval} seconds`));
+        console.log(chalk.dim('  Press Ctrl+C to stop\n'));
+
+        // Handle graceful shutdown
+        process.on('SIGINT', () => {
+          console.log(chalk.yellow('\nStopping merge detection daemon...'));
+          detector.stopPolling();
+          db.close();
+          process.exit(0);
+        });
+
+        process.on('SIGTERM', () => {
+          detector.stopPolling();
+          db.close();
+          process.exit(0);
+        });
+
+        detector.startPolling();
+
+        // Keep process alive
+        await new Promise(() => {}); // Never resolves, runs until signal
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Merge detection failed: ${errorMessage}`));
+      }
+      db.close();
+      process.exit(1);
+    }
+  });
+
+/**
+ * Show merge events (v0.4)
+ * Display history of detected merge events
+ */
+program
+  .command('merge-status')
+  .description('Show merge events and subscription status (v0.4)')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--branch <name>', 'Filter by branch name')
+  .option('--limit <n>', 'Limit number of results', '20')
+  .option('--subscriptions', 'Show active subscriptions instead of merge events')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const db = new SessionDB();
+    try {
+      const limit = parseInt(options.limit, 10) || 20;
+
+      if (options.subscriptions) {
+        // Show subscriptions
+        const subscriptions = db.getActiveSubscriptions();
+        let filtered = subscriptions;
+
+        if (options.repo) {
+          filtered = filtered.filter(s => s.repo_path.includes(options.repo));
+        }
+        if (options.branch) {
+          filtered = filtered.filter(s => s.branch_name.includes(options.branch));
+        }
+
+        filtered = filtered.slice(0, limit);
+
+        if (options.json) {
+          console.log(JSON.stringify({ subscriptions: filtered, total: filtered.length }, null, 2));
+        } else {
+          console.log(chalk.bold(`\nActive Merge Subscriptions: ${filtered.length}`));
+
+          if (filtered.length === 0) {
+            console.log(chalk.dim('  No active subscriptions'));
+          } else {
+            for (const sub of filtered) {
+              console.log(`\n  ${chalk.blue('●')} ${sub.branch_name} → ${sub.target_branch}`);
+              console.log(chalk.dim(`    Session: ${sub.session_id}`));
+              console.log(chalk.dim(`    Repo: ${sub.repo_path}`));
+              console.log(chalk.dim(`    Created: ${sub.created_at}`));
+            }
+          }
+          console.log('');
+        }
+      } else {
+        // Show merge events
+        let events = options.repo
+          ? db.getMergeEventsByRepo(options.repo)
+          : db.getAllMergeEvents();
+
+        if (options.branch) {
+          events = events.filter(e => e.branch_name.includes(options.branch));
+        }
+
+        events = events.slice(0, limit);
+
+        if (options.json) {
+          console.log(JSON.stringify({ events, total: events.length }, null, 2));
+        } else {
+          console.log(chalk.bold(`\nMerge Events: ${events.length}`));
+
+          if (events.length === 0) {
+            console.log(chalk.dim('  No merge events recorded'));
+            console.log(chalk.dim('  Run "parallel-cc watch-merges" to start detecting merges'));
+          } else {
+            for (const event of events) {
+              const status = event.notification_sent
+                ? chalk.green('✓')
+                : chalk.yellow('○');
+              console.log(`\n  ${status} ${event.branch_name} → ${event.target_branch}`);
+              console.log(chalk.dim(`    Repo: ${event.repo_path}`));
+              console.log(chalk.dim(`    Merged: ${event.merged_at}`));
+              console.log(chalk.dim(`    Detected: ${event.detected_at}`));
+              console.log(chalk.dim(`    Source commit: ${event.source_commit.substring(0, 8)}`));
+            }
+          }
+          console.log('');
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get merge status: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      db.close();
     }
   });
 

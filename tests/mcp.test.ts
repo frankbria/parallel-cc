@@ -7,7 +7,11 @@ import { Coordinator } from '../src/coordinator.js';
 import {
   getParallelStatus,
   getMySession,
-  notifyWhenMerged
+  notifyWhenMerged,
+  checkMergeStatus,
+  getMergeEvents,
+  checkConflicts,
+  rebaseAssist
 } from '../src/mcp/tools.js';
 import {
   GetParallelStatusInputSchema,
@@ -348,11 +352,40 @@ describe('MCP Tools', () => {
   });
 
   // ==========================================================================
-  // notifyWhenMerged tests
+  // notifyWhenMerged tests (v0.4 - requires valid session)
   // ==========================================================================
 
   describe('notifyWhenMerged', () => {
-    it('should return subscribed true with message', async () => {
+    it('should return subscribed false when not in managed session', async () => {
+      delete process.env.PARALLEL_CC_SESSION_ID;
+      const input: NotifyWhenMergedInput = { branch: 'feature-branch' };
+      const result = await notifyWhenMerged(input);
+
+      expect(result.subscribed).toBe(false);
+      expect(result.message).toContain('Not running in a parallel-cc managed session');
+    });
+
+    it('should include error message when no session', async () => {
+      delete process.env.PARALLEL_CC_SESSION_ID;
+      const input: NotifyWhenMergedInput = { branch: 'my-custom-branch' };
+      const result = await notifyWhenMerged(input);
+
+      expect(result.subscribed).toBe(false);
+      expect(result.message).toContain('PARALLEL_CC_SESSION_ID');
+    });
+
+    it('should return subscribed true with valid session', async () => {
+      process.env.PARALLEL_CC_SESSION_ID = 'test-session-123';
+      // Mock status to return a session matching our session ID
+      const mockSession = createMockSession({ sessionId: 'test-session-123' });
+      mockCoordinatorInstance.status.mockReturnValue(createMockStatusResult([mockSession]));
+      // Mock the subscribeToMerge method
+      mockCoordinatorInstance.subscribeToMerge = vi.fn().mockReturnValue({
+        subscriptionId: 'sub-123',
+        success: true,
+        message: 'Subscribed to feature-branch'
+      });
+
       const input: NotifyWhenMergedInput = { branch: 'feature-branch' };
       const result = await notifyWhenMerged(input);
 
@@ -360,35 +393,36 @@ describe('MCP Tools', () => {
       expect(result.message).toContain('feature-branch');
     });
 
-    it('should include branch name in message', async () => {
-      const input: NotifyWhenMergedInput = { branch: 'my-custom-branch' };
+    it('should handle targetBranch parameter', async () => {
+      process.env.PARALLEL_CC_SESSION_ID = 'test-session-123';
+      // Mock status to return a session matching our session ID
+      const mockSession = createMockSession({ sessionId: 'test-session-123' });
+      mockCoordinatorInstance.status.mockReturnValue(createMockStatusResult([mockSession]));
+      mockCoordinatorInstance.subscribeToMerge = vi.fn().mockReturnValue({
+        subscriptionId: 'sub-123',
+        success: true,
+        message: 'Subscribed'
+      });
+
+      const input: NotifyWhenMergedInput = { branch: 'feature-branch', targetBranch: 'develop' };
       const result = await notifyWhenMerged(input);
 
-      expect(result.message).toContain('my-custom-branch');
-      expect(result.message).toContain('merge');
+      expect(result.subscribed).toBe(true);
+      expect(mockCoordinatorInstance.subscribeToMerge).toHaveBeenCalledWith(
+        'test-session-123',
+        'feature-branch',
+        'develop'
+      );
     });
 
-    it('should indicate v0.4 implementation', async () => {
-      const input: NotifyWhenMergedInput = { branch: 'test-branch' };
-      const result = await notifyWhenMerged(input);
-
-      expect(result.message).toContain('v0.4');
-    });
-
-    it('should suggest using get_parallel_status', async () => {
-      const input: NotifyWhenMergedInput = { branch: 'test-branch' };
-      const result = await notifyWhenMerged(input);
-
-      expect(result.message).toContain('get_parallel_status');
-    });
-
-    it('should handle different branch names', async () => {
+    it('should handle different branch names without session', async () => {
+      delete process.env.PARALLEL_CC_SESSION_ID;
       const branches = ['main', 'develop', 'feature/new-feature', 'bugfix/critical'];
 
       for (const branch of branches) {
         const result = await notifyWhenMerged({ branch });
-        expect(result.subscribed).toBe(true);
-        expect(result.message).toContain(branch);
+        // Without session, all should fail
+        expect(result.subscribed).toBe(false);
       }
     });
   });
@@ -552,11 +586,15 @@ describe('MCP Tools', () => {
       expect(status.totalSessions).toBe(2);
     });
 
-    it('should handle workflow: subscribe to merge notifications', async () => {
+    it('should handle workflow: subscribe to merge notifications (requires session)', async () => {
+      // v0.4: notifyWhenMerged requires a valid session
+      delete process.env.PARALLEL_CC_SESSION_ID;
       const result = await notifyWhenMerged({ branch: 'feature-branch' });
 
-      expect(result.subscribed).toBe(true);
+      // Without session, subscription fails
+      expect(result.subscribed).toBe(false);
       expect(result.message).toBeTruthy();
+      expect(result.message).toContain('PARALLEL_CC_SESSION_ID');
     });
 
     it('should handle all null values in session output', async () => {
@@ -619,6 +657,224 @@ describe('MCP Tools', () => {
   });
 
   // ==========================================================================
+  // checkMergeStatus tests (v0.4)
+  // ==========================================================================
+
+  describe('checkMergeStatus', () => {
+    it('should return isMerged false when branch not merged', async () => {
+      mockCoordinatorInstance.getBranchMergeStatus = vi.fn().mockReturnValue({
+        isMerged: false,
+        mergeEvent: null
+      });
+
+      const result = await checkMergeStatus({ branch: 'feature-branch' });
+
+      expect(result.isMerged).toBe(false);
+      expect(result.mergeEvent).toBeNull();
+      expect(result.message).toContain('has not been detected as merged');
+    });
+
+    it('should return merge event when branch is merged', async () => {
+      const mergeEvent = {
+        branch_name: 'feature-branch',
+        target_branch: 'main',
+        source_commit: 'abc123',
+        target_commit: 'def456',
+        merged_at: '2025-01-01T10:00:00Z',
+        detected_at: '2025-01-01T10:05:00Z'
+      };
+
+      mockCoordinatorInstance.getBranchMergeStatus = vi.fn().mockReturnValue({
+        isMerged: true,
+        mergeEvent
+      });
+
+      const result = await checkMergeStatus({ branch: 'feature-branch' });
+
+      expect(result.isMerged).toBe(true);
+      expect(result.mergeEvent).not.toBeNull();
+      expect(result.mergeEvent!.branchName).toBe('feature-branch');
+      expect(result.mergeEvent!.targetBranch).toBe('main');
+      expect(result.message).toContain('was merged');
+    });
+
+    it('should close coordinator after execution', async () => {
+      mockCoordinatorInstance.getBranchMergeStatus = vi.fn().mockReturnValue({
+        isMerged: false,
+        mergeEvent: null
+      });
+
+      await checkMergeStatus({ branch: 'any-branch' });
+
+      expect(mockCoordinatorInstance.close).toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // getMergeEvents tests (v0.4)
+  // ==========================================================================
+
+  describe('getMergeEvents', () => {
+    it('should return empty events array when no merges', async () => {
+      mockCoordinatorInstance.getMergeEvents = vi.fn().mockReturnValue([]);
+
+      const result = await getMergeEvents({});
+
+      expect(result.events).toEqual([]);
+      expect(result.total).toBe(0);
+    });
+
+    it('should return merge events with correct mapping', async () => {
+      const events = [
+        {
+          branch_name: 'feature-1',
+          target_branch: 'main',
+          source_commit: 'abc123',
+          target_commit: 'def456',
+          merged_at: '2025-01-01T10:00:00Z',
+          detected_at: '2025-01-01T10:05:00Z'
+        },
+        {
+          branch_name: 'feature-2',
+          target_branch: 'main',
+          source_commit: 'ghi789',
+          target_commit: 'jkl012',
+          merged_at: '2025-01-02T10:00:00Z',
+          detected_at: '2025-01-02T10:05:00Z'
+        }
+      ];
+
+      mockCoordinatorInstance.getMergeEvents = vi.fn().mockReturnValue(events);
+
+      const result = await getMergeEvents({});
+
+      expect(result.events).toHaveLength(2);
+      expect(result.events[0].branchName).toBe('feature-1');
+      expect(result.events[1].branchName).toBe('feature-2');
+      expect(result.total).toBe(2);
+    });
+
+    it('should respect limit parameter', async () => {
+      const events = Array.from({ length: 100 }, (_, i) => ({
+        branch_name: `feature-${i}`,
+        target_branch: 'main',
+        source_commit: `abc${i}`,
+        target_commit: `def${i}`,
+        merged_at: '2025-01-01T10:00:00Z',
+        detected_at: '2025-01-01T10:05:00Z'
+      }));
+
+      mockCoordinatorInstance.getMergeEvents = vi.fn().mockReturnValue(events);
+
+      const result = await getMergeEvents({ limit: 10 });
+
+      expect(result.events).toHaveLength(10);
+      expect(result.total).toBe(100); // total is actual count, not sliced count
+    });
+
+    it('should use repo_path when provided', async () => {
+      mockCoordinatorInstance.getMergeEvents = vi.fn().mockReturnValue([]);
+
+      await getMergeEvents({ repo_path: '/custom/repo/path' });
+
+      expect(mockCoordinatorInstance.getMergeEvents).toHaveBeenCalledWith('/custom/repo/path');
+    });
+
+    it('should close coordinator after execution', async () => {
+      mockCoordinatorInstance.getMergeEvents = vi.fn().mockReturnValue([]);
+
+      await getMergeEvents({});
+
+      expect(mockCoordinatorInstance.close).toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // checkConflicts tests (v0.4)
+  // ==========================================================================
+
+  describe('checkConflicts', () => {
+    it('should handle non-existent branches gracefully', async () => {
+      const result = await checkConflicts({
+        currentBranch: 'nonexistent-branch',
+        targetBranch: 'main'
+      });
+
+      // Should return either an error message or no conflicts
+      expect(result.conflictingFiles).toBeDefined();
+      expect(Array.isArray(result.conflictingFiles)).toBe(true);
+    });
+
+    it('should return hasConflicts field', async () => {
+      const result = await checkConflicts({
+        currentBranch: 'main',
+        targetBranch: 'main'
+      });
+
+      expect(typeof result.hasConflicts).toBe('boolean');
+    });
+
+    it('should return guidance array when present', async () => {
+      const result = await checkConflicts({
+        currentBranch: 'main',
+        targetBranch: 'main'
+      });
+
+      // guidance may be undefined for some results (e.g., errors)
+      if (result.guidance) {
+        expect(Array.isArray(result.guidance)).toBe(true);
+      }
+    });
+
+    it('should return summary string', async () => {
+      const result = await checkConflicts({
+        currentBranch: 'main',
+        targetBranch: 'main'
+      });
+
+      expect(typeof result.summary).toBe('string');
+    });
+  });
+
+  // ==========================================================================
+  // rebaseAssist tests (v0.4)
+  // ==========================================================================
+
+  describe('rebaseAssist', () => {
+    it('should perform conflict check in checkOnly mode', async () => {
+      const result = await rebaseAssist({
+        targetBranch: 'main',
+        checkOnly: true
+      });
+
+      expect(result.success).toBeDefined();
+      expect(result.hasConflicts).toBeDefined();
+      expect(result.conflictingFiles).toBeDefined();
+    });
+
+    it('should return appropriate fields for checkOnly mode', async () => {
+      const result = await rebaseAssist({
+        targetBranch: 'main',
+        checkOnly: true
+      });
+
+      expect(typeof result.output).toBe('string');
+      expect(typeof result.conflictSummary).toBe('string');
+    });
+
+    it('should handle targetBranch parameter', async () => {
+      const result = await rebaseAssist({
+        targetBranch: 'develop',
+        checkOnly: true
+      });
+
+      // Should not throw and return valid result
+      expect(result).toBeDefined();
+      expect(result.conflictingFiles).toBeDefined();
+    });
+  });
+
+  // ==========================================================================
   // Edge cases
   // ==========================================================================
 
@@ -652,7 +908,9 @@ describe('MCP Tools', () => {
       expect(result.sessions[0].pid).toBe(largePid);
     });
 
-    it('should handle branch names with special characters', async () => {
+    it('should handle branch names with special characters (without session)', async () => {
+      // v0.4: notifyWhenMerged requires a session
+      delete process.env.PARALLEL_CC_SESSION_ID;
       const specialBranches = [
         'feature/FOO-123',
         'bugfix/issue#456',
@@ -663,8 +921,9 @@ describe('MCP Tools', () => {
 
       for (const branch of specialBranches) {
         const result = await notifyWhenMerged({ branch });
-        expect(result.subscribed).toBe(true);
-        expect(result.message).toContain(branch);
+        // Without session, all should fail gracefully
+        expect(result.subscribed).toBe(false);
+        expect(result.message).toBeDefined();
       }
     });
 
