@@ -17,11 +17,11 @@ All versions are linked for easy navigation, and each section includes status, o
 - **[v0.2](#v02---core-infrastructure)** - CLI + SQLite + wrapper script ✅
 - **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration ✅
 - **[v0.2.3-v0.2.4](#installation-improvements)** - Shell alias setup + full installation command ✅
-- **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries ✅ (current)
+- **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries ✅
+- **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance ✅ (current)
 
 ### Planned Versions
-- **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance
-- **[v0.5](#v05---file-level-conflict-detection)** - File-Level Conflict Detection
+- **[v0.5](#v05---advanced-conflict-resolution)** - Advanced Conflict Resolution & Auto-fix Suggestions
 - **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration for Autonomous Execution (major milestone)
 
 ---
@@ -187,7 +187,7 @@ parallel-cc install --status
 
 ## v0.3 - MCP Server for Status Queries
 
-**Status:** Completed ✅ (Current Version)
+**Status:** Completed ✅
 
 ### Overview
 Added MCP server so Claude Code can query the coordinator mid-session to understand what other sessions are doing.
@@ -266,57 +266,81 @@ Subscribe to notifications when a branch is merged to main.
 
 ## v0.4 - Branch Merge Detection & Rebase Assistance
 
-**Status:** Planned
+**Status:** Completed ✅ (Current Version)
 
 ### Overview
-Proactively detect when parallel branches are merged and help coordinate rebases.
+Proactively detect when parallel branches are merged and help coordinate rebases. Sessions can subscribe to merge notifications and Claude can assist with conflict checking and rebasing.
 
-### Features
+### Achievements
+- **303 tests, 100% passing** with comprehensive coverage
+- Merge detection daemon with polling and subscription system
+- Conflict checking before rebase attempts
+- Rebase assistance with detailed conflict reporting
+- 7 MCP tools for full merge/rebase workflow support
 
-#### Merge Detection
-- Poll git for merged branches every N seconds
-- Detect when worktree branches have been merged to main
-- Track merge events in SQLite
+### Features Delivered
 
-#### Rebase Prompts
-When a parallel branch merges:
-1. MCP server sends notification to active sessions
-2. Claude can prompt: "The `auth-backend` branch was just merged. Want me to rebase your work?"
-3. If yes, Claude runs `git fetch && git rebase origin/main`
+#### Merge Detection Daemon
+- `parallel-cc watch-merges` - Continuous polling for merged branches
+- `parallel-cc watch-merges --once` - Single poll for testing
+- Tracks merge events in SQLite with timestamps and notification status
+- Automatic subscription notification system
 
-#### Conflict Resolution Assistance
-- Detect rebase conflicts
-- Provide context about what the other branch changed
-- Suggest resolution strategies
+#### MCP Tools (7 total)
+1. **get_parallel_status** - Query active sessions in repo
+2. **get_my_session** - Current session info (requires PARALLEL_CC_SESSION_ID)
+3. **notify_when_merged** - Subscribe to merge notifications for a branch
+4. **check_merge_status** - Check if a branch has been merged
+5. **check_conflicts** - Preview rebase conflicts between branches
+6. **rebase_assist** - Perform rebase with conflict detection
+7. **get_merge_events** - List merge history for a repository
 
-### Database Additions
+#### CLI Commands
+- `watch-merges [--once]` - Start merge detection daemon
+- `merge-status [--subscriptions]` - Show merge events or active subscriptions
+
+### Database Schema (v0.4)
 ```sql
 CREATE TABLE merge_events (
   id TEXT PRIMARY KEY,
-  branch TEXT NOT NULL,
-  merged_at TEXT NOT NULL,
-  merged_into TEXT DEFAULT 'main',
-  notified_sessions TEXT  -- JSON array of session IDs notified
+  repo_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  source_commit TEXT NOT NULL,
+  target_branch TEXT NOT NULL DEFAULT 'main',
+  target_commit TEXT NOT NULL,
+  merged_at TEXT NOT NULL DEFAULT (datetime('now')),
+  detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+  notification_sent INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE subscriptions (
-  session_id TEXT,
-  branch TEXT,
-  created_at TEXT,
-  PRIMARY KEY (session_id, branch)
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  target_branch TEXT NOT NULL DEFAULT 'main',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  notified_at TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 ```
 
 ---
 
-## v0.5 - File-Level Conflict Detection
+## v0.5 - Advanced Conflict Resolution
 
 **Status:** Planned
 
 ### Overview
-Track which files each session is modifying to warn about potential conflicts before they happen.
+Build on v0.4's conflict checking with advanced resolution capabilities. Provide intelligent auto-fix suggestions and file-level conflict prevention.
 
 ### Features
+
+#### Merge Conflict Auto-fix Suggestions
+- Analyze conflict patterns and suggest resolutions
+- Detect common conflict types (import additions, function modifications)
+- Provide AI-assisted merge suggestions via MCP
 
 #### File Claim System
 - Sessions register files they intend to modify
@@ -328,9 +352,13 @@ Track which files each session is modifying to warn about potential conflicts be
 // Claim files before editing
 claim_files({ files: string[], mode: 'advisory' | 'exclusive' })
 
-// Check for conflicts
-check_conflicts({ files: string[] }) 
+// Check for file-level conflicts
+check_file_conflicts({ files: string[] })
 // Returns: { conflicts: [{ file, claimedBy, sessionId }] }
+
+// Get auto-fix suggestions for conflicts
+suggest_conflict_resolution({ conflictingFiles: string[] })
+// Returns: { suggestions: [{ file, strategy, confidence }] }
 
 // Release claims
 release_files({ files: string[] })

@@ -333,7 +333,7 @@ Get history of detected merge events for a repository.
 | v0.2.4 | ✅ Complete | Shell alias setup, full install command |
 | v0.3 | ✅ Complete | MCP server, >85% test coverage |
 | v0.4 | ✅ Current | Branch merge detection, rebase assistance, conflict checking |
-| v0.5 | Planned | Advanced conflict resolution, merge conflict auto-fix suggestions |
+| v0.5 | Planned | Advanced conflict resolution, auto-fix suggestions, file claims |
 | v1.0 | Planned | E2B sandbox integration |
 
 ## Coding Standards

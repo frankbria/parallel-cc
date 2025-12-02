@@ -1,6 +1,6 @@
 # parallel-cc
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -34,6 +34,9 @@
 - 🧹 **Auto-cleanup** - Worktrees removed when sessions end
 - 💓 **Heartbeat monitoring** - Detect and clean up stale sessions
 - 🎯 **Zero configuration** - Works out of the box
+- 🔀 **Merge detection** - Know when parallel branches are merged (v0.4)
+- ⚠️ **Conflict checking** - Preview rebase conflicts before they happen (v0.4)
+- 🤖 **MCP integration** - Claude can query session status and assist with rebases
 
 ## The Problem
 
@@ -180,7 +183,7 @@ parallel-cc status
 parallel-cc status --repo /path/to/repo
 parallel-cc status --json
 
-# Full installation (hooks + alias)
+# Full installation (hooks + alias + MCP)
 parallel-cc install --all                # Install everything
 parallel-cc install --interactive        # Prompted installation
 
@@ -193,6 +196,9 @@ parallel-cc install --hooks --local      # Install locally
 parallel-cc install --alias              # Add claude=claude-parallel alias
 parallel-cc install --alias --uninstall  # Remove alias
 
+# MCP server configuration
+parallel-cc install --mcp                # Configure MCP server in Claude settings
+
 # Check installation status
 parallel-cc install --status
 
@@ -204,6 +210,12 @@ parallel-cc release --pid $$
 
 # Clean up stale sessions
 parallel-cc cleanup
+
+# Merge detection (v0.4)
+parallel-cc watch-merges                 # Start merge detection daemon
+parallel-cc watch-merges --once          # Run single merge detection poll
+parallel-cc merge-status                 # Show merge events history
+parallel-cc merge-status --subscriptions # Show active merge subscriptions
 ```
 
 ## 🔄 How Sessions Work
@@ -252,11 +264,11 @@ git merge <worktree-branch-name>
 - [x] **v0.2** - Core infrastructure (CLI + SQLite + wrapper script)
 - [x] **v0.2.1** - Hook installation & configuration
 - [x] **v0.2.4** - Shell alias setup & full installation command
-- [x] **v0.3** - MCP server for status queries + >85% test coverage ← *Current*
+- [x] **v0.3** - MCP server for status queries + >85% test coverage
+- [x] **v0.4** - Branch merge detection & rebase assistance ← *Current*
 
 **Planned:**
-- [ ] **v0.4** - Branch merge detection & rebase assistance
-- [ ] **v0.5** - File-level conflict detection
+- [ ] **v0.5** - Advanced conflict resolution & auto-fix suggestions
 - [ ] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 *Major milestone*
 
 See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and future ideas.
