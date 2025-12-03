@@ -11,6 +11,7 @@ import traverseDefault from '@babel/traverse';
 import * as t from '@babel/types';
 import { readFile, stat } from 'fs/promises';
 import * as path from 'path';
+import { createHash } from 'crypto';
 
 // Handle ESM/CJS interop for @babel/traverse
 const traverse = (traverseDefault as any).default || traverseDefault;
@@ -59,6 +60,7 @@ export interface ASTDiff {
 interface ASTCacheEntry {
   ast: t.File;
   mtime: number; // File modification time
+  contentHash: string; // SHA-256 hash of content
 }
 
 /**
@@ -95,8 +97,11 @@ export class ASTAnalyzer {
    */
   async parseFile(filePath: string, content: string): Promise<t.File | null> {
     try {
+      // Compute content hash for cache validation
+      const contentHash = this.computeContentHash(content);
+
       // Check cache first
-      const cached = await this.getCachedAST(filePath);
+      const cached = await this.getCachedAST(filePath, contentHash);
       if (cached) {
         return cached;
       }
@@ -108,7 +113,8 @@ export class ASTAnalyzer {
         // Cache the result (use current time as mtime for in-memory content)
         this.astCache.set(filePath, {
           ast,
-          mtime: Date.now()
+          mtime: Date.now(),
+          contentHash
         });
       }
 
@@ -151,9 +157,10 @@ export class ASTAnalyzer {
         // Node added in ast2
         addedNodes.push(node2);
       } else {
-        // Node exists in both - check if modified
-        // (Simplified: we'd need deeper comparison in production)
-        // For now, assume same key = not modified at this level
+        // Node exists in both - check if location changed (indicates modification)
+        if (this.hasLocationChanged(node1, node2)) {
+          modifiedNodes.push(node2);
+        }
       }
     }
 
@@ -335,13 +342,27 @@ export class ASTAnalyzer {
 
   /**
    * Get cached AST if file hasn't changed
+   *
+   * Validates cache using both mtime (for file-based parsing) and
+   * content hash (for in-memory parsing).
+   *
+   * @param filePath - Path to file
+   * @param contentHash - SHA-256 hash of content (optional)
+   * @returns Cached AST or null if invalid
    */
-  private async getCachedAST(filePath: string): Promise<t.File | null> {
+  private async getCachedAST(filePath: string, contentHash?: string): Promise<t.File | null> {
     const cached = this.astCache.get(filePath);
     if (!cached) return null;
 
+    // If content hash provided, validate it matches
+    if (contentHash && cached.contentHash !== contentHash) {
+      // Content changed, invalidate cache
+      this.astCache.delete(filePath);
+      return null;
+    }
+
     try {
-      // Check if file has been modified
+      // Check if file has been modified (for file-based parsing)
       const stats = await stat(filePath);
       const currentMtime = stats.mtimeMs;
 
@@ -355,6 +376,7 @@ export class ASTAnalyzer {
     } catch {
       // File doesn't exist or can't be accessed
       // This is expected for in-memory content during conflict resolution
+      // Rely on content hash validation in this case
       return cached.ast;
     }
   }
@@ -364,6 +386,26 @@ export class ASTAnalyzer {
    */
   private nodeKey(node: ASTNode): string {
     return `${node.type}:${node.name || 'anonymous'}`;
+  }
+
+  /**
+   * Check if node location changed (indicates modification)
+   *
+   * Compares line ranges to detect if a node was modified.
+   * A change in line numbers suggests the node content changed.
+   */
+  private hasLocationChanged(node1: ASTNode, node2: ASTNode): boolean {
+    // If either node lacks location info, can't determine modification
+    if (!node1.loc || !node2.loc) {
+      return false;
+    }
+
+    // Check if line range changed
+    const lineRangeChanged =
+      node1.loc.start !== node2.loc.start ||
+      node1.loc.end !== node2.loc.end;
+
+    return lineRangeChanged;
   }
 
   /**
@@ -390,5 +432,15 @@ export class ASTAnalyzer {
       .filter(line => line.length > 0 && !line.startsWith('//'))
       .join(' ')
       .trim();
+  }
+
+  /**
+   * Compute SHA-256 hash of content for cache validation
+   *
+   * @param content - Content to hash
+   * @returns SHA-256 hash in hex format
+   */
+  private computeContentHash(content: string): string {
+    return createHash('sha256').update(content).digest('hex');
   }
 }

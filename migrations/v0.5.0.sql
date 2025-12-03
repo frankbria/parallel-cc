@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS file_claims (
   claimed_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at TEXT NOT NULL,
   last_heartbeat TEXT NOT NULL DEFAULT (datetime('now')),
-  escalated_from TEXT CHECK (escalated_from IS NULL OR escalated_from IN ('EXCLUSIVE', 'SHARED', 'INTENT')),
+  escalated_from TEXT CHECK (escalated_from IS NULL OR escalated_from IN ('EXCLUSIVE', 'SHARED', 'INTENT')),  -- Stores previous claim mode when escalating, not UUID FK
   metadata TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   released_at TEXT,

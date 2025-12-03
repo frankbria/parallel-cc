@@ -131,7 +131,13 @@ export class Coordinator {
     }
 
     // Release all file claims for this session
-    await this.fileClaimsManager.releaseAllForSession(session.id);
+    // Wrap in try-catch to ensure cleanup proceeds even if claim release fails
+    try {
+      await this.fileClaimsManager.releaseAllForSession(session.id);
+    } catch (error) {
+      logger.error(`Failed to release file claims for session ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
+      // Continue with cleanup - don't let claim release failure block session cleanup
+    }
 
     let worktreeRemoved = false;
 

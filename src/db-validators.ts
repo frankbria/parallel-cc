@@ -5,7 +5,7 @@
  * to prevent path traversal attacks and ensure data integrity.
  */
 
-import { normalize, isAbsolute, join } from 'path';
+import { normalize, isAbsolute, join, sep } from 'path';
 
 /**
  * Validate a file path to prevent path traversal attacks
@@ -44,8 +44,12 @@ export function validateFilePath(repoPath: string, filePath: string): void {
   }
 
   // Construct full path and verify it's within repo
-  const fullPath = join(repoPath, normalized);
-  if (!fullPath.startsWith(repoPath)) {
+  const fullPath = normalize(join(repoPath, normalized));
+  const normalizedRepo = normalize(repoPath);
+
+  // Use path.sep to ensure we don't match similarly-named directories
+  // Example: /home/user/repo should NOT match /home/user/repo-malicious/evil.txt
+  if (!fullPath.startsWith(normalizedRepo + sep) && fullPath !== normalizedRepo) {
     throw new Error('File path escapes repository boundary');
   }
 }

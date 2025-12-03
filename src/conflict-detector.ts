@@ -444,16 +444,41 @@ export class ConflictDetector {
 
   /**
    * Extract file path from merge-tree output
-   * (Simplified - in production would need proper parsing)
+   *
+   * LIMITATION: git merge-tree outputs structured format with OID lines
+   * and "Conflicted file info" sections, not standard diff markers.
+   * This simplified implementation searches for diff-like markers which
+   * may not be present. A production implementation should parse the
+   * structured format properly.
+   *
+   * Expected git merge-tree format:
+   * - OID lines with commit hashes
+   * - "Conflicted file info" section with mode/oid tuples
+   * - File content with conflict markers
+   *
+   * @param lines - Lines of merge-tree output
+   * @param currentIndex - Current line index
+   * @returns Extracted file path or 'unknown'
    */
   private extractFilePathFromMergeTree(lines: string[], currentIndex: number): string {
     // Look backwards for file path indicator
     for (let i = currentIndex; i >= Math.max(0, currentIndex - 50); i--) {
       const line = lines[i];
-      // Common patterns in merge-tree output
+
+      // Check for diff-style markers (may not be present in merge-tree output)
       if (line.startsWith('+++') || line.startsWith('---')) {
         const match = line.match(/[+-]{3}\s+[ab]\/(.*)/);
         if (match) return match[1];
+      }
+
+      // Check for "Conflicted file info" line (actual merge-tree format)
+      if (line.includes('Conflicted file info')) {
+        const nextLine = lines[i + 1];
+        if (nextLine) {
+          // Extract path from tuple format: mode oid stage path
+          const match = nextLine.match(/\d+\s+[0-9a-f]+\s+\d+\s+(.*)/);
+          if (match) return match[1];
+        }
       }
     }
     return 'unknown';

@@ -40,6 +40,23 @@ import {
 } from './db-validators.js';
 import { logger } from './logger.js';
 
+/**
+ * Safely parse JSON with error handling
+ *
+ * @param json - JSON string to parse
+ * @returns Parsed object or undefined on error
+ */
+function safeParseJSON(json: string | null | undefined): any {
+  if (!json) return undefined;
+
+  try {
+    return JSON.parse(json);
+  } catch (error) {
+    logger.warn(`Failed to parse JSON metadata: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
 export class SessionDB {
   private db: Database.Database;
 
@@ -841,7 +858,7 @@ export class SessionDB {
       expires_at: row.expires_at,
       last_heartbeat: row.last_heartbeat,
       escalated_from: row.escalated_from || undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      metadata: row.metadata ? safeParseJSON(row.metadata) : undefined,
       is_active: row.is_active === 1,
       released_at: row.released_at || undefined,
       deleted_at: row.deleted_at || undefined,
@@ -1028,7 +1045,7 @@ export class SessionDB {
       detected_at: row.detected_at,
       resolved_at: row.resolved_at || undefined,
       auto_fix_suggestion_id: row.auto_fix_suggestion_id || undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      metadata: row.metadata ? safeParseJSON(row.metadata) : undefined,
       deleted_at: row.deleted_at || undefined,
       deleted_reason: row.deleted_reason || undefined
     };
@@ -1171,7 +1188,7 @@ export class SessionDB {
       generated_at: row.generated_at,
       applied_at: row.applied_at || undefined,
       was_auto_applied: row.was_auto_applied === 1,
-      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+      metadata: row.metadata ? safeParseJSON(row.metadata) : undefined,
       deleted_at: row.deleted_at || undefined,
       deleted_reason: row.deleted_reason || undefined
     };
