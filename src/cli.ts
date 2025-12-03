@@ -31,7 +31,7 @@ import { startMcpServer } from './mcp/index.js';
 program
   .name('parallel-cc')
   .description('Coordinate parallel Claude Code sessions using git worktrees')
-  .version('0.4.0');
+  .version('0.5.0');
 
 /**
  * Helper to prompt user for input (for interactive mode)
@@ -668,7 +668,7 @@ program
  */
 program
   .command('mcp-serve')
-  .description('Start MCP server for Claude Code integration (stdio transport)')
+  .description('Start MCP server for Claude Code integration - exposes v0.5 tools for file claims, conflict detection, and auto-fix (stdio transport)')
   .action(async () => {
     try {
       await startMcpServer();
@@ -874,7 +874,7 @@ program
  */
 program
   .command('migrate')
-  .description('Run database migration to v0.5 schema')
+  .description('Run database migration to v0.5 schema (adds file_claims, conflict_resolutions, auto_fix_suggestions tables)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -905,7 +905,7 @@ program
  */
 program
   .command('claims')
-  .description('List active file claims (v0.5)')
+  .description('List active file claims - shows EXCLUSIVE/SHARED/INTENT locks on files (v0.5)')
   .option('--repo <path>', 'Filter by repository path')
   .option('--session <id>', 'Filter by session ID')
   .option('--file <path>', 'Filter by file path')
@@ -965,10 +965,10 @@ program
  */
 program
   .command('conflicts')
-  .description('View conflict resolution history (v0.5)')
+  .description('View conflict resolution history - tracks semantic, structural, and concurrent edit conflicts (v0.5)')
   .option('--repo <path>', 'Filter by repository path')
   .option('--file <path>', 'Filter by file path')
-  .option('--type <type>', 'Filter by conflict type')
+  .option('--type <type>', 'Filter by conflict type (TRIVIAL, CONCURRENT_EDIT, STRUCTURAL, SEMANTIC)')
   .option('--resolved', 'Show only resolved conflicts')
   .option('--limit <n>', 'Limit number of results', '20')
   .option('--json', 'Output as JSON')
@@ -1034,7 +1034,7 @@ program
  */
 program
   .command('suggestions')
-  .description('List auto-fix suggestions (v0.5)')
+  .description('List AI-generated auto-fix suggestions for detected conflicts with confidence scores (v0.5)')
   .option('--repo <path>', 'Filter by repository path')
   .option('--file <path>', 'Filter by file path')
   .option('--min-confidence <n>', 'Minimum confidence score (0-1)', '0.5')
