@@ -508,7 +508,7 @@ export async function claimFile(
   const coordinator = new Coordinator();
   try {
     const repoPath = process.cwd();
-    const fileClaimsManager = new FileClaimsManager(coordinator['db'], defaultLogger);
+    const fileClaimsManager = new FileClaimsManager(coordinator.getDB(), defaultLogger);
 
     try {
       const claim = await fileClaimsManager.acquireClaim({
@@ -529,7 +529,7 @@ export async function claimFile(
       if (error instanceof ConflictError) {
         // Return conflicting claim details
         const conflictingClaim = error.conflictingClaim;
-        const session = coordinator['db'].getSessionById(conflictingClaim.session_id);
+        const session = coordinator.getDB().getSessionById(conflictingClaim.session_id);
 
         return {
           success: false,
@@ -577,7 +577,7 @@ export async function releaseFile(
 
   const coordinator = new Coordinator();
   try {
-    const fileClaimsManager = new FileClaimsManager(coordinator['db'], defaultLogger);
+    const fileClaimsManager = new FileClaimsManager(coordinator.getDB(), defaultLogger);
 
     const released = await fileClaimsManager.releaseClaim(
       input.claimId,
@@ -618,7 +618,7 @@ export async function listFileClaims(
   const coordinator = new Coordinator();
   try {
     const repoPath = process.cwd();
-    const fileClaimsManager = new FileClaimsManager(coordinator['db'], defaultLogger);
+    const fileClaimsManager = new FileClaimsManager(coordinator.getDB(), defaultLogger);
 
     const claims = fileClaimsManager.listClaims({
       repoPath,
@@ -629,7 +629,7 @@ export async function listFileClaims(
 
     // Get session info for each claim
     const claimsWithSessionInfo = claims.map(claim => {
-      const session = coordinator['db'].getSessionById(claim.session_id);
+      const session = coordinator.getDB().getSessionById(claim.session_id);
       const now = new Date();
       const expiresAt = new Date(claim.expires_at);
       const minutesUntilExpiry = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / (1000 * 60)));
@@ -760,7 +760,7 @@ export async function getAutoFixSuggestions(
     const confidenceScorer = new ConfidenceScorer(astAnalyzer, defaultLogger);
     const strategyChain = createDefaultStrategyChain(astAnalyzer);
     const autoFixEngine = new AutoFixEngine(
-      coordinator['db'],
+      coordinator.getDB(),
       astAnalyzer,
       confidenceScorer,
       strategyChain,
@@ -846,7 +846,7 @@ export async function applyAutoFix(
     const strategyChain = createDefaultStrategyChain(astAnalyzer);
 
     const autoFixEngine = new AutoFixEngine(
-      coordinator['db'],
+      coordinator.getDB(),
       astAnalyzer,
       confidenceScorer,
       strategyChain,
@@ -908,7 +908,7 @@ export async function conflictHistory(
     const repoPath = process.cwd();
 
     // Get conflict resolutions
-    const allResolutions = coordinator['db'].getConflictResolutions({
+    const allResolutions = coordinator.getDB().getConflictResolutions({
       repo_path: repoPath,
       file_path: input.filePath,
       conflict_type: input.conflictType,
@@ -926,7 +926,7 @@ export async function conflictHistory(
       let explanation: string | undefined;
 
       if (r.auto_fix_suggestion_id) {
-        const suggestions = coordinator['db'].getAutoFixSuggestions({
+        const suggestions = coordinator.getDB().getAutoFixSuggestions({
           id: r.auto_fix_suggestion_id
         });
         if (suggestions.length > 0) {
