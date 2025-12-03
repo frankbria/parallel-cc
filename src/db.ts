@@ -785,6 +785,8 @@ export class SessionDB {
     const updateValues: unknown[] = [];
 
     if (updates.claim_mode) {
+      // Validate claim mode before updating
+      validateClaimMode(updates.claim_mode);
       updateFields.push('claim_mode = ?');
       updateValues.push(updates.claim_mode);
     }
