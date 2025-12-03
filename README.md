@@ -1,6 +1,6 @@
 # parallel-cc
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -37,6 +37,10 @@
 - 🔀 **Merge detection** - Know when parallel branches are merged (v0.4)
 - ⚠️ **Conflict checking** - Preview rebase conflicts before they happen (v0.4)
 - 🤖 **MCP integration** - Claude can query session status and assist with rebases
+- 🔒 **File claims** - Coordinate exclusive/shared file access across parallel sessions (v0.5)
+- 🧠 **Conflict resolution** - Track and resolve semantic, structural, and concurrent edit conflicts (v0.5)
+- ⚡ **Auto-fix suggestions** - AI-generated conflict resolutions with confidence scores (v0.5)
+- 🔍 **AST analysis** - Deep semantic conflict detection using abstract syntax trees (v0.5)
 
 ## The Problem
 
@@ -216,6 +220,15 @@ parallel-cc watch-merges                 # Start merge detection daemon
 parallel-cc watch-merges --once          # Run single merge detection poll
 parallel-cc merge-status                 # Show merge events history
 parallel-cc merge-status --subscriptions # Show active merge subscriptions
+
+# Advanced conflict resolution (v0.5)
+parallel-cc migrate                      # Run database migration to v0.5 schema
+parallel-cc claims                       # List active file claims
+parallel-cc claims --file src/app.ts     # Filter by file path
+parallel-cc conflicts                    # View conflict resolution history
+parallel-cc conflicts --type SEMANTIC    # Filter by conflict type
+parallel-cc suggestions                  # List auto-fix suggestions
+parallel-cc suggestions --min-confidence 0.8  # Filter by confidence threshold
 ```
 
 ## 🔄 How Sessions Work
@@ -265,10 +278,15 @@ git merge <worktree-branch-name>
 - [x] **v0.2.1** - Hook installation & configuration
 - [x] **v0.2.4** - Shell alias setup & full installation command
 - [x] **v0.3** - MCP server for status queries + >85% test coverage
-- [x] **v0.4** - Branch merge detection & rebase assistance ← *Current*
+- [x] **v0.4** - Branch merge detection & rebase assistance
+- [x] **v0.5** - Advanced conflict resolution & auto-fix suggestions ← *Current*
+  - File claims system for coordinating file access
+  - Conflict detection (semantic, structural, concurrent edits)
+  - AST-based analysis with Babel parser
+  - AI-generated auto-fix suggestions with confidence scores
+  - MCP tools for conflict resolution workflows
 
 **Planned:**
-- [ ] **v0.5** - Advanced conflict resolution & auto-fix suggestions
 - [ ] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 *Major milestone*
 
 See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and future ideas.

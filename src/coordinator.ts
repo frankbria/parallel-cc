@@ -413,6 +413,13 @@ export class Coordinator {
   }
   
   /**
+   * Get database instance (for MCP tools and testing)
+   */
+  getDB(): SessionDB {
+    return this.db;
+  }
+
+  /**
    * Close database connection
    */
   close(): void {

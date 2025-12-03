@@ -26,3 +26,4 @@ coverage/
 # Environment
 .env
 .env.local
+*.backup

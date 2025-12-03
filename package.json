@@ -1,6 +1,6 @@
 {
   "name": "parallel-cc",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Coordinate parallel Claude Code sessions using git worktrees",
   "type": "module",
   "bin": {
