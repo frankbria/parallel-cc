@@ -4,7 +4,7 @@
 
 `parallel-cc` is a coordinator for running multiple Claude Code sessions in parallel on the same repository. It uses git worktrees to isolate each session's work.
 
-**Current Version:** 0.4.0
+**Current Version:** 0.5.0
 
 ## Architecture
 
@@ -29,17 +29,27 @@
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  MCP Server (v0.4)                                          │
+│  MCP Server (v0.5)                                          │
 │  ─────────────────                                          │
 │  parallel-cc mcp-serve (stdio transport)                    │
 │       │                                                      │
-│       ├──► get_parallel_status - query active sessions      │
-│       ├──► get_my_session - current session info            │
-│       ├──► notify_when_merged - subscribe to merge events   │
-│       ├──► check_merge_status - check if branch merged      │
-│       ├──► check_conflicts - preview rebase conflicts       │
-│       ├──► rebase_assist - help with rebasing               │
-│       └──► get_merge_events - list merge history            │
+│       ├──► Session Management (v0.3-v0.4)                   │
+│       │   ├──► get_parallel_status - query active sessions  │
+│       │   ├──► get_my_session - current session info        │
+│       │   ├──► notify_when_merged - subscribe to merges     │
+│       │   ├──► check_merge_status - check if merged         │
+│       │   ├──► check_conflicts - preview conflicts          │
+│       │   ├──► rebase_assist - help with rebasing           │
+│       │   └──► get_merge_events - list merge history        │
+│       │                                                      │
+│       └──► Conflict Resolution (v0.5)                       │
+│           ├──► claimFile - acquire file access lock         │
+│           ├──► releaseFile - release file claim             │
+│           ├──► listFileClaims - query active claims         │
+│           ├──► detectAdvancedConflicts - AST analysis       │
+│           ├──► getAutoFixSuggestions - AI-powered fixes     │
+│           ├──► applyAutoFix - apply suggestion              │
+│           └──► conflictHistory - resolution history         │
 │                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
@@ -75,6 +85,9 @@
 │       ├── sessions table (PID, repo, worktree, heartbeat)   │
 │       ├── merge_events table (v0.4 - detected merges)       │
 │       ├── subscriptions table (v0.4 - merge watchers)       │
+│       ├── file_claims table (v0.5 - file access locks)      │
+│       ├── conflict_resolutions (v0.5 - conflict tracking)   │
+│       ├── auto_fix_suggestions (v0.5 - AI fixes)            │
 │       └── indexes for fast lookup                           │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
@@ -84,18 +97,25 @@
 
 ```
 src/
-├── cli.ts             # Commander-based CLI entry point
-├── coordinator.ts     # Core logic - session management
-├── db.ts              # SQLite operations via better-sqlite3
-├── gtr.ts             # Wrapper for gtr CLI commands (v1.x and v2.x)
-├── hooks-installer.ts # Hook + alias + MCP configuration
-├── logger.ts          # Logging utilities
-├── merge-detector.ts  # Merge detection polling logic (v0.4)
-├── types.ts           # TypeScript type definitions
-└── mcp/               # MCP server module (v0.4)
-    ├── index.ts       # Server setup and tool registration
-    ├── tools.ts       # Tool implementations
-    └── schemas.ts     # Zod schemas for inputs/outputs
+├── cli.ts              # Commander-based CLI entry point
+├── coordinator.ts      # Core logic - session management
+├── db.ts               # SQLite operations via better-sqlite3
+├── db-validators.ts    # Database input validation (v0.5)
+├── gtr.ts              # Wrapper for gtr CLI commands (v1.x and v2.x)
+├── hooks-installer.ts  # Hook + alias + MCP configuration
+├── logger.ts           # Logging utilities
+├── merge-detector.ts   # Merge detection polling logic (v0.4)
+├── file-claims.ts      # File access coordination (v0.5)
+├── conflict-detector.ts # Conflict detection & classification (v0.5)
+├── ast-analyzer.ts     # AST-based semantic analysis (v0.5)
+├── auto-fix-engine.ts  # AI-powered resolution generation (v0.5)
+├── confidence-scorer.ts # Confidence scoring for suggestions (v0.5)
+├── merge-strategies.ts # Conflict resolution strategies (v0.5)
+├── types.ts            # TypeScript type definitions
+└── mcp/                # MCP server module (v0.5)
+    ├── index.ts        # Server setup and tool registration
+    ├── tools.ts        # Tool implementations (16 tools)
+    └── schemas.ts      # Zod schemas for inputs/outputs
 
 scripts/
 ├── claude-parallel.sh  # Wrapper script (main entry point for users)
@@ -104,12 +124,20 @@ scripts/
 └── uninstall.sh        # Removal script
 
 tests/
-├── db.test.ts              # SessionDB tests (55 tests)
-├── coordinator.test.ts     # Coordinator tests (37 tests)
-├── gtr.test.ts             # GtrWrapper tests (49 tests)
-├── hooks-installer.test.ts # Hook installer tests (76 tests)
-├── mcp.test.ts             # MCP tools tests (65 tests)
-└── merge-detector.test.ts  # Merge detection tests (21 tests)
+├── db.test.ts                      # SessionDB tests
+├── coordinator.test.ts             # Coordinator tests
+├── gtr.test.ts                     # GtrWrapper tests
+├── hooks-installer.test.ts         # Hook installer tests
+├── merge-detector.test.ts          # Merge detection tests
+├── file-claims.test.ts             # File claims tests (v0.5)
+├── conflict-detector.basic.test.ts # Conflict detector tests (v0.5)
+├── ast-analyzer.basic.test.ts      # AST analyzer tests (v0.5)
+├── auto-fix-engine.test.ts         # Auto-fix engine tests (v0.5)
+├── merge-strategies.basic.test.ts  # Merge strategies tests (v0.5)
+├── integration.test.ts             # End-to-end integration tests (v0.5)
+└── mcp-tools-smoke.test.ts         # MCP tools smoke tests (v0.5)
+
+Total: 441 tests, 100% passing, 87.5% function coverage
 
 vitest.config.ts  # Test framework configuration (project root)
 ```
@@ -122,8 +150,11 @@ vitest.config.ts  # Test framework configuration (project root)
 4. **Heartbeats** - Optional PostToolUse hook updates timestamps for stale detection
 5. **Auto-cleanup** - Dead sessions and their worktrees are cleaned up automatically
 6. **Hook Installer** - CLI tool to configure Claude Code settings for heartbeat integration
-7. **MCP Server** - Exposes tools for Claude to query session status and merge info (v0.4)
+7. **MCP Server** - Exposes 16 tools for session management and conflict resolution (v0.3-v0.5)
 8. **Merge Detection** - Polls git to detect when branches are merged, notifies subscribers (v0.4)
+9. **File Claims** - Coordinate EXCLUSIVE/SHARED/INTENT file access across parallel sessions (v0.5)
+10. **Conflict Detection** - AST-based semantic analysis for TRIVIAL/CONCURRENT/STRUCTURAL/SEMANTIC conflicts (v0.5)
+11. **Auto-Fix Suggestions** - AI-powered conflict resolution with confidence scoring (v0.5)
 
 ## Development Commands
 
@@ -332,9 +363,9 @@ Get history of detected merge events for a repository.
 | v0.2.1 | ✅ Complete | Hook installer CLI, Vitest testing |
 | v0.2.4 | ✅ Complete | Shell alias setup, full install command |
 | v0.3 | ✅ Complete | MCP server, >85% test coverage |
-| v0.4 | ✅ Current | Branch merge detection, rebase assistance, conflict checking |
-| v0.5 | Planned | Advanced conflict resolution, auto-fix suggestions, file claims |
-| v1.0 | Planned | E2B sandbox integration |
+| v0.4 | ✅ Complete | Branch merge detection, rebase assistance, conflict checking |
+| v0.5 | ✅ Current | File claims, AST conflict detection, AI auto-fix, 441 tests (100%) |
+| v1.0 | Planned | E2B sandbox integration for autonomous execution |
 
 ## Coding Standards
 

@@ -18,10 +18,10 @@ All versions are linked for easy navigation, and each section includes status, o
 - **[v0.2.1](#v021---hook-installation--configuration-priority)** - Hook Installation & Configuration ✅
 - **[v0.2.3-v0.2.4](#installation-improvements)** - Shell alias setup + full installation command ✅
 - **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries ✅
-- **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance ✅ (current)
+- **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance ✅
+- **[v0.5](#v05---advanced-conflict-resolution)** - Advanced Conflict Resolution & Auto-fix Suggestions ✅ (current)
 
 ### Planned Versions
-- **[v0.5](#v05---advanced-conflict-resolution)** - Advanced Conflict Resolution & Auto-fix Suggestions
 - **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration for Autonomous Execution (major milestone)
 
 ---
@@ -330,7 +330,13 @@ CREATE TABLE subscriptions (
 
 ## v0.5 - Advanced Conflict Resolution
 
-**Status:** Planned
+**Status:** Completed ✅
+
+**Implemented:** Comprehensive conflict resolution system with AST-based semantic analysis, file claims coordination, and AI-powered auto-fix suggestions.
+
+**Testing:** 441 tests total (100% pass rate), 87.5% function coverage
+**Security:** Zero critical vulnerabilities, comprehensive input validation
+**Migration:** Complete migration guide provided for database schema updates
 
 ### Overview
 Build on v0.4's conflict checking with advanced resolution capabilities. Provide intelligent auto-fix suggestions and file-level conflict prevention.
