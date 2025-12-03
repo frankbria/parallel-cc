@@ -426,12 +426,12 @@ export class ASTAnalyzer {
    */
   private normalizeCode(code: string): string {
     return code
-      .replace(/\s+/g, ' ') // Collapse all whitespace to single space
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0 && !line.startsWith('//'))
-      .join(' ')
-      .trim();
+      .split('\n') // Split into lines first (before collapsing whitespace)
+      .map(line => line.trim()) // Trim each line
+      .filter(line => line.length > 0 && !line.startsWith('//')) // Remove empty lines and comments
+      .join(' ') // Join remaining lines with space
+      .replace(/\s+/g, ' ') // Now collapse consecutive whitespace
+      .trim(); // Final trim
   }
 
   /**
