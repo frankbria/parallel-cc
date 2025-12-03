@@ -59,10 +59,10 @@ program
   .requiredOption('--repo <path>', 'Repository path')
   .requiredOption('--pid <number>', 'Process ID', parseInt)
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action(async (options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.register(options.repo, options.pid);
+      const result = await coordinator.register(options.repo, options.pid);
 
       if (options.json) {
         console.log(JSON.stringify(result));
@@ -125,10 +125,10 @@ program
   .description('Release a session and cleanup worktree')
   .requiredOption('--pid <number>', 'Process ID', parseInt)
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action(async (options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.release(options.pid);
+      const result = await coordinator.release(options.pid);
 
       if (options.json) {
         console.log(JSON.stringify(result));
@@ -214,10 +214,10 @@ program
   .command('cleanup')
   .description('Remove stale sessions and orphaned worktrees')
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action(async (options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.cleanup();
+      const result = await coordinator.cleanup();
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));

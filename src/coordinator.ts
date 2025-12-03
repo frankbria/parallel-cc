@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import { SessionDB } from './db.js';
 import { GtrWrapper } from './gtr.js';
 import { logger } from './logger.js';
+import { FileClaimsManager } from './file-claims.js';
 import type {
   RegisterResult,
   StatusResult,
@@ -21,16 +22,18 @@ import { DEFAULT_CONFIG } from './types.js';
 export class Coordinator {
   private db: SessionDB;
   private config: Config;
+  private fileClaimsManager: FileClaimsManager;
   
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.db = new SessionDB(this.config.dbPath);
+    this.fileClaimsManager = new FileClaimsManager(this.db, logger);
   }
   
   /**
    * Register a new session. Creates worktree if parallel session exists.
    */
-  register(repoPath: string, pid: number): RegisterResult {
+  async register(repoPath: string, pid: number): Promise<RegisterResult> {
     // Validate inputs
     if (!repoPath || typeof repoPath !== 'string') {
       throw new Error('Invalid repository path');
@@ -56,7 +59,7 @@ export class Coordinator {
     }
 
     // Clean up stale sessions first
-    this.cleanupStaleSessions();
+    await this.cleanupStaleSessions();
 
     // CRITICAL: Use transaction to make check-then-create atomic
     // This prevents race condition where two sessions both think they're first
@@ -121,14 +124,17 @@ export class Coordinator {
   /**
    * Release a session and optionally cleanup worktree
    */
-  release(pid: number): { released: boolean; worktreeRemoved: boolean } {
+  async release(pid: number): Promise<{ released: boolean; worktreeRemoved: boolean }> {
     const session = this.db.getSessionByPid(pid);
     if (!session) {
       return { released: false, worktreeRemoved: false };
     }
-    
+
+    // Release all file claims for this session
+    await this.fileClaimsManager.releaseAllForSession(session.id);
+
     let worktreeRemoved = false;
-    
+
     // Remove worktree if it was created for this session
     if (!session.is_main_repo && session.worktree_name && this.config.autoCleanupWorktrees) {
       const gtr = new GtrWrapper(session.repo_path);
@@ -140,10 +146,10 @@ export class Coordinator {
         logger.error(`Failed to remove worktree ${session.worktree_name}: ${result.error}`);
       }
     }
-    
+
     // Delete session record
     this.db.deleteSession(session.id);
-    
+
     return { released: true, worktreeRemoved };
   }
 
@@ -185,7 +191,7 @@ export class Coordinator {
   /**
    * Cleanup stale sessions (no heartbeat for threshold period)
    */
-  cleanup(): CleanupResult {
+  async cleanup(): Promise<CleanupResult> {
     const staleSessions = this.db.getStaleSessions(this.config.staleThresholdMinutes);
     const removedSessions: string[] = [];
     const worktreesRemoved: string[] = [];
@@ -193,6 +199,9 @@ export class Coordinator {
     for (const session of staleSessions) {
       // Double-check process is actually dead
       if (!this.isProcessAlive(session.pid)) {
+        // Release all file claims for this session
+        await this.fileClaimsManager.releaseAllForSession(session.id);
+
         // Deactivate subscriptions for removed session
         try {
           const subscriptions = this.db.getSubscriptionsBySession(session.id);
@@ -220,6 +229,10 @@ export class Coordinator {
         removedSessions.push(session.id);
       }
     }
+
+    // Cleanup stale file claims
+    const staleClaims = await this.fileClaimsManager.cleanupStaleClaims();
+    logger.info(`Cleanup: Cleaned up ${staleClaims} stale file claims`);
 
     return {
       removed: removedSessions.length,
@@ -356,9 +369,9 @@ export class Coordinator {
     }
   }
   
-  private cleanupStaleSessions(): void {
+  private async cleanupStaleSessions(): Promise<void> {
     // Silent cleanup during registration
-    this.cleanup();
+    await this.cleanup();
   }
 
   /**
