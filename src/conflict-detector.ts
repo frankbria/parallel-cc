@@ -383,12 +383,15 @@ export class ConflictDetector {
       // Look for conflict start marker
       if (line.startsWith('<<<<<<<')) {
         const start = i;
+        let baseMarker = -1;
         let divider = -1;
         let end = -1;
 
-        // Find divider and end
+        // Find base marker (diff3), divider, and end
         for (let j = i + 1; j < lines.length; j++) {
-          if (lines[j].startsWith('=======')) {
+          if (lines[j].startsWith('|||||||')) {
+            baseMarker = j;
+          } else if (lines[j].startsWith('=======')) {
             divider = j;
           } else if (lines[j].startsWith('>>>>>>>')) {
             end = j;
@@ -397,16 +400,30 @@ export class ConflictDetector {
         }
 
         if (divider !== -1 && end !== -1) {
-          // Extract content sections
-          const oursContent = lines.slice(start + 1, divider).join('\n');
-          const theirsContent = lines.slice(divider + 1, end).join('\n');
+          let oursContent: string;
+          let theirsContent: string;
+          let baseContent: string | undefined;
+
+          // Check if this is a diff3-style conflict (with base section)
+          if (baseMarker !== -1 && baseMarker < divider) {
+            // Three-way conflict: ours | base | theirs
+            oursContent = lines.slice(start + 1, baseMarker).join('\n');
+            baseContent = lines.slice(baseMarker + 1, divider).join('\n');
+            theirsContent = lines.slice(divider + 1, end).join('\n');
+          } else {
+            // Two-way conflict: ours | theirs
+            oursContent = lines.slice(start + 1, divider).join('\n');
+            theirsContent = lines.slice(divider + 1, end).join('\n');
+            baseContent = undefined;
+          }
 
           markers.push({
             start,
             divider,
             end,
             oursContent,
-            theirsContent
+            theirsContent,
+            baseContent
           });
 
           i = end + 1;

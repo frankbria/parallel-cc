@@ -51,6 +51,50 @@ line 2 theirs
 
       expect(markers).toHaveLength(2);
     });
+
+    it('should parse diff3-style conflict markers with base content', () => {
+      const detector = new ConflictDetector('/tmp/test');
+
+      const content = `
+<<<<<<< HEAD
+function foo() { return 'ours'; }
+||||||| base
+function foo() { return 'original'; }
+=======
+function foo() { return 'theirs'; }
+>>>>>>> feature
+`;
+
+      const markers = (detector as any).parseConflictMarkers(content);
+
+      expect(markers).toHaveLength(1);
+      expect(markers[0]).toMatchObject({
+        oursContent: expect.stringContaining('ours'),
+        baseContent: expect.stringContaining('original'),
+        theirsContent: expect.stringContaining('theirs')
+      });
+    });
+
+    it('should handle 2-way conflicts without base content', () => {
+      const detector = new ConflictDetector('/tmp/test');
+
+      const content = `
+<<<<<<< HEAD
+function foo() { return 'ours'; }
+=======
+function foo() { return 'theirs'; }
+>>>>>>> feature
+`;
+
+      const markers = (detector as any).parseConflictMarkers(content);
+
+      expect(markers).toHaveLength(1);
+      expect(markers[0]).toMatchObject({
+        oursContent: expect.stringContaining('ours'),
+        theirsContent: expect.stringContaining('theirs')
+      });
+      expect(markers[0].baseContent).toBeUndefined();
+    });
   });
 
   describe('classifyConflict', () => {
