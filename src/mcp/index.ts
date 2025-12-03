@@ -21,7 +21,21 @@ import {
   RebaseAssistInputSchema,
   RebaseAssistOutputSchema,
   GetMergeEventsInputSchema,
-  GetMergeEventsOutputSchema
+  GetMergeEventsOutputSchema,
+  ClaimFileInputSchema,
+  ClaimFileOutputSchema,
+  ReleaseFileInputSchema,
+  ReleaseFileOutputSchema,
+  ListFileClaimsInputSchema,
+  ListFileClaimsOutputSchema,
+  DetectAdvancedConflictsInputSchema,
+  DetectAdvancedConflictsOutputSchema,
+  GetAutoFixSuggestionsInputSchema,
+  GetAutoFixSuggestionsOutputSchema,
+  ApplyAutoFixInputSchema,
+  ApplyAutoFixOutputSchema,
+  ConflictHistoryInputSchema,
+  ConflictHistoryOutputSchema
 } from './schemas.js';
 import {
   getParallelStatus,
@@ -30,7 +44,14 @@ import {
   checkMergeStatus,
   checkConflicts,
   rebaseAssist,
-  getMergeEvents
+  getMergeEvents,
+  claimFile,
+  releaseFile,
+  listFileClaims,
+  detectAdvancedConflicts,
+  getAutoFixSuggestions,
+  applyAutoFix,
+  conflictHistory
 } from './tools.js';
 
 /**
@@ -39,7 +60,7 @@ import {
 export function createMcpServer(): McpServer {
   const server = new McpServer({
     name: 'parallel-cc',
-    version: '0.4.0'
+    version: '0.5.0'
   });
 
   // Register get_parallel_status tool
@@ -168,6 +189,132 @@ export function createMcpServer(): McpServer {
     }
   );
 
+  // Register claim_file tool (v0.5)
+  server.registerTool(
+    'claim_file',
+    {
+      title: 'Claim File',
+      description: 'Acquire a claim on a file to prevent concurrent edits. Supports EXCLUSIVE (blocks all), SHARED (allows read), and INTENT (non-blocking) modes. Requires running in a parallel-cc managed session.',
+      inputSchema: ClaimFileInputSchema,
+      outputSchema: ClaimFileOutputSchema
+    },
+    async (input) => {
+      const output = await claimFile(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register release_file tool (v0.5)
+  server.registerTool(
+    'release_file',
+    {
+      title: 'Release File',
+      description: 'Release a previously acquired file claim. Use the claim ID from claim_file.',
+      inputSchema: ReleaseFileInputSchema,
+      outputSchema: ReleaseFileOutputSchema
+    },
+    async (input) => {
+      const output = await releaseFile(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register list_file_claims tool (v0.5)
+  server.registerTool(
+    'list_file_claims',
+    {
+      title: 'List File Claims',
+      description: 'List all active file claims with optional filters (file paths, session ID, include expired). Shows who has claimed which files and when claims expire.',
+      inputSchema: ListFileClaimsInputSchema,
+      outputSchema: ListFileClaimsOutputSchema
+    },
+    async (input) => {
+      const output = await listFileClaims(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register detect_advanced_conflicts tool (v0.5)
+  server.registerTool(
+    'detect_advanced_conflicts',
+    {
+      title: 'Detect Advanced Conflicts',
+      description: 'Detect and classify merge/rebase conflicts with AST-based semantic analysis. Identifies conflict types (STRUCTURAL, SEMANTIC, CONCURRENT_EDIT, TRIVIAL) and severity levels.',
+      inputSchema: DetectAdvancedConflictsInputSchema,
+      outputSchema: DetectAdvancedConflictsOutputSchema
+    },
+    async (input) => {
+      const output = await detectAdvancedConflicts(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register get_auto_fix_suggestions tool (v0.5)
+  server.registerTool(
+    'get_auto_fix_suggestions',
+    {
+      title: 'Get Auto-Fix Suggestions',
+      description: 'Generate AI-powered conflict resolution suggestions for a file. Returns multiple strategies ranked by confidence score with preview and risk assessment.',
+      inputSchema: GetAutoFixSuggestionsInputSchema,
+      outputSchema: GetAutoFixSuggestionsOutputSchema
+    },
+    async (input) => {
+      const output = await getAutoFixSuggestions(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register apply_auto_fix tool (v0.5)
+  server.registerTool(
+    'apply_auto_fix',
+    {
+      title: 'Apply Auto-Fix',
+      description: 'Apply an auto-fix suggestion to resolve conflicts. Includes safety checks: backup creation, syntax validation, conflict marker verification, and rollback commands.',
+      inputSchema: ApplyAutoFixInputSchema,
+      outputSchema: ApplyAutoFixOutputSchema
+    },
+    async (input) => {
+      const output = await applyAutoFix(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
+  // Register conflict_history tool (v0.5)
+  server.registerTool(
+    'conflict_history',
+    {
+      title: 'Conflict History',
+      description: 'Get conflict resolution history with statistics. Shows past resolutions, auto-fix rates, average confidence scores, and resolution strategies used.',
+      inputSchema: ConflictHistoryInputSchema,
+      outputSchema: ConflictHistoryOutputSchema
+    },
+    async (input) => {
+      const output = await conflictHistory(input);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output
+      };
+    }
+  );
+
   return server;
 }
 
@@ -189,5 +336,12 @@ export {
   checkMergeStatus,
   checkConflicts,
   rebaseAssist,
-  getMergeEvents
+  getMergeEvents,
+  claimFile,
+  releaseFile,
+  listFileClaims,
+  detectAdvancedConflicts,
+  getAutoFixSuggestions,
+  applyAutoFix,
+  conflictHistory
 };

@@ -104,7 +104,7 @@ export class AutoFixEngine {
 
   constructor(
     private db: SessionDB,
-    private astAnalyzer: ASTAnalyzer,
+    public readonly astAnalyzer: ASTAnalyzer,
     private confidenceScorer: ConfidenceScorer,
     private strategyChain: StrategyChain,
     private logger?: Logger

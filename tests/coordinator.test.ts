@@ -190,7 +190,7 @@ describe('Coordinator', () => {
 
     it('should continue in main repo with warning when worktree creation fails', async () => {
       // Register first session
-     await  coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Mock worktree creation failure
       const MockedGtrWrapper = vi.mocked(GtrWrapper);
@@ -228,7 +228,7 @@ describe('Coordinator', () => {
 
     it('should filter dead processes when checking for parallel sessions', async () => {
       // Register first session with a PID that will be "dead"
-     await  coordinator.register(TEST_REPO_PATH, 99999);
+      await coordinator.register(TEST_REPO_PATH, 99999);
 
       // Mock process.kill to return false for PID 99999 (dead)
       processKillSpy.mockImplementation((pid: number, signal: number | string = 0) => {
@@ -248,7 +248,7 @@ describe('Coordinator', () => {
 
   describe('heartbeat', () => {
     it('should return true when session exists', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const result = coordinator.heartbeat(12345);
       expect(result).toBe(true);
@@ -260,7 +260,7 @@ describe('Coordinator', () => {
     });
 
     it('should update last_heartbeat timestamp', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Get initial status
       const status1 = coordinator.status(TEST_REPO_PATH);
@@ -284,7 +284,7 @@ describe('Coordinator', () => {
 
   describe('release', () => {
     it('should release main repo session without worktree cleanup', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const result = await coordinator.release(12345);
 
@@ -298,8 +298,8 @@ describe('Coordinator', () => {
 
     it('should release worktree session and cleanup worktree when autoCleanupWorktrees=true', async () => {
       // Create parallel sessions
-     await  coordinator.register(TEST_REPO_PATH, 12345);
-     await  coordinator.register(TEST_REPO_PATH, 12346);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12346);
 
       const result = await coordinator.release(12346);
 
@@ -347,8 +347,8 @@ describe('Coordinator', () => {
 
     it('should still delete session record even if worktree cleanup fails', async () => {
       // Create parallel sessions
-     await  coordinator.register(TEST_REPO_PATH, 12345);
-     await  coordinator.register(TEST_REPO_PATH, 12346);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12346);
 
       // Mock worktree removal failure
       const MockedGtrWrapper = vi.mocked(GtrWrapper);
@@ -371,8 +371,8 @@ describe('Coordinator', () => {
 
   describe('status', () => {
     it('should return sessions for specific repo only', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
-     await  coordinator.register(TEST_REPO_PATH_2, 12346);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH_2, 12346);
 
       const status = coordinator.status(TEST_REPO_PATH);
 
@@ -382,8 +382,8 @@ describe('Coordinator', () => {
     });
 
     it('should return all sessions when no repo specified', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
-     await  coordinator.register(TEST_REPO_PATH_2, 12346);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH_2, 12346);
 
       const status = coordinator.status();
 
@@ -392,8 +392,8 @@ describe('Coordinator', () => {
     });
 
     it('should correctly identify alive vs dead processes', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
-     await  coordinator.register(TEST_REPO_PATH, 99999);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 99999);
 
       // Mock process.kill to identify 99999 as dead
       processKillSpy.mockImplementation((pid: number, signal: number | string = 0) => {
@@ -411,7 +411,7 @@ describe('Coordinator', () => {
     });
 
     it('should calculate correct duration in minutes', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const status = coordinator.status(TEST_REPO_PATH);
 
@@ -422,7 +422,7 @@ describe('Coordinator', () => {
     });
 
     it('should include all session info fields', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const status = coordinator.status(TEST_REPO_PATH);
       const session = status.sessions[0];
@@ -455,7 +455,7 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 60 // Don't cleanup during register
       });
 
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for 2 seconds to ensure timestamp difference (SQLite has second-level precision)
@@ -467,7 +467,10 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 0
       });
 
-      const result = shortStaleCoord.cleanup();
+      // Run migration for new database
+      await shortStaleCoord['db'].migrateToV05();
+
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.removed).toBe(1);
       expect(result.sessions).toHaveLength(1);
@@ -482,7 +485,7 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 60
       });
 
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -503,7 +506,10 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 0
       });
 
-      const result = cleanupCoord.cleanup();
+      // Run migration for new database
+      await cleanupCoord['db'].migrateToV05();
+
+      const result = await cleanupCoord.cleanup();
 
       // Session should have been removed (either during constructor or explicit cleanup)
       expect(result.removed).toBeGreaterThanOrEqual(0); // May be 0 if already cleaned up during constructor
@@ -524,8 +530,8 @@ describe('Coordinator', () => {
       });
 
       // Register parallel sessions
-      normalCoord.register(TEST_REPO_PATH, 12345);
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 12345);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -538,6 +544,9 @@ describe('Coordinator', () => {
         autoCleanupWorktrees: true
       });
 
+      // Run migration for new database
+      await shortStaleCoord['db'].migrateToV05();
+
       // Clear mocks from registration
       vi.clearAllMocks();
 
@@ -549,7 +558,7 @@ describe('Coordinator', () => {
         return true;
       });
 
-      const result = shortStaleCoord.cleanup();
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.worktreesRemoved.length).toBeGreaterThan(0);
       expect(GtrWrapper.prototype.removeWorktree).toHaveBeenCalled();
@@ -564,7 +573,7 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 60
       });
 
-      normalCoord.register(TEST_REPO_PATH, 12345);
+      await normalCoord.register(TEST_REPO_PATH, 12345);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -581,7 +590,7 @@ describe('Coordinator', () => {
         return true; // All processes are alive
       });
 
-      const result = shortStaleCoord.cleanup();
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.removed).toBe(0);
       expect(result.sessions).toHaveLength(0);
@@ -598,8 +607,8 @@ describe('Coordinator', () => {
       });
 
       // Register parallel sessions
-      normalCoord.register(TEST_REPO_PATH, 12345);
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 12345);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -611,6 +620,9 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 0,
         autoCleanupWorktrees: true
       });
+
+      // Run migration for new database
+      await shortStaleCoord['db'].migrateToV05();
 
       // Mock worktree removal failure
       const MockedGtrWrapper = vi.mocked(GtrWrapper);
@@ -628,7 +640,7 @@ describe('Coordinator', () => {
         return true;
       });
 
-      const result = shortStaleCoord.cleanup();
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.removed).toBeGreaterThan(0);
       expect(result.worktreesRemoved).toHaveLength(0);
@@ -676,13 +688,13 @@ describe('Coordinator', () => {
       });
 
       // Register a session
-      testCoord.register(TEST_REPO_PATH, 12345);
+      await testCoord.register(TEST_REPO_PATH, 12345);
 
       // Close should not throw
       expect(() => testCoord.close()).not.toThrow();
 
       // Further operations should fail
-      expect(() => testCoord.register(TEST_REPO_PATH, 12346)).toThrow();
+      await expect(testCoord.register(TEST_REPO_PATH, 12346)).rejects.toThrow();
     });
   });
 
@@ -723,17 +735,17 @@ describe('Coordinator', () => {
       expect(status.totalSessions).toBe(3);
 
       // Release middle session
-     await  coordinator.release(12346);
+      await coordinator.release(12346);
 
       const status2 = coordinator.status(TEST_REPO_PATH);
       expect(status2.totalSessions).toBe(2);
     });
 
     it('should handle multiple repos independently', async () => {
-     await  coordinator.register(TEST_REPO_PATH, 12345);
-     await  coordinator.register(TEST_REPO_PATH, 12346);
-     await  coordinator.register(TEST_REPO_PATH_2, 12347);
-     await  coordinator.register(TEST_REPO_PATH_2, 12348);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12346);
+      await coordinator.register(TEST_REPO_PATH_2, 12347);
+      await coordinator.register(TEST_REPO_PATH_2, 12348);
 
       const status1 = coordinator.status(TEST_REPO_PATH);
       const status2 = coordinator.status(TEST_REPO_PATH_2);

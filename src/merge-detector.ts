@@ -16,6 +16,11 @@ import type {
   BranchStatus,
   Subscription
 } from './types.js';
+import { ConflictDetector } from './conflict-detector.js';
+import { ASTAnalyzer } from './ast-analyzer.js';
+import { AutoFixEngine } from './auto-fix-engine.js';
+import { ConfidenceScorer } from './confidence-scorer.js';
+import { createDefaultStrategyChain } from './merge-strategies.js';
 
 export interface MergeDetectorConfig {
   pollIntervalSeconds?: number;
@@ -32,10 +37,30 @@ export class MergeDetector {
   private config: Required<MergeDetectorConfig>;
   private pollInterval: NodeJS.Timeout | null = null;
   private isPolling = false;
+  private autoFixEngine?: AutoFixEngine;
 
   constructor(db: SessionDB, config?: MergeDetectorConfig) {
     this.db = db;
     this.config = { ...DEFAULT_CONFIG, ...config };
+
+    // Initialize v0.5 components for auto-fix generation
+    try {
+      const astAnalyzer = new ASTAnalyzer();
+      const confidenceScorer = new ConfidenceScorer(astAnalyzer);
+      const strategyChain = createDefaultStrategyChain(astAnalyzer);
+
+      this.autoFixEngine = new AutoFixEngine(
+        this.db,
+        astAnalyzer,
+        confidenceScorer,
+        strategyChain
+      );
+
+      logger.debug('MergeDetector: Initialized auto-fix engine for post-merge conflict detection');
+    } catch (error) {
+      logger.warn(`MergeDetector: Failed to initialize auto-fix engine: ${error instanceof Error ? error.message : 'unknown error'}`);
+      this.autoFixEngine = undefined;
+    }
   }
 
   /**
@@ -156,6 +181,9 @@ export class MergeDetector {
             result.notificationsSent += notified;
 
             logger.info(`Created merge event ${createdEvent.id}, notified ${notified} subscription(s)`);
+
+            // NEW (v0.5): Check for conflicts in active sessions after merge
+            await this.detectConflictsInActiveSessions(repoPath, branchName, targetBranch);
           }
         } catch (error) {
           const errMsg = `Failed to check ${branchName} -> ${targetBranch} in ${repoPath}: ${error}`;
@@ -382,5 +410,97 @@ export class MergeDetector {
    */
   isActivelyPolling(): boolean {
     return this.pollInterval !== null;
+  }
+
+  /**
+   * Detect conflicts in active sessions after a merge (v0.5)
+   * Generates auto-fix suggestions for each detected conflict
+   */
+  private async detectConflictsInActiveSessions(
+    repoPath: string,
+    mergedBranch: string,
+    targetBranch: string
+  ): Promise<void> {
+    if (!this.autoFixEngine) {
+      logger.debug('Auto-fix engine not available, skipping conflict detection');
+      return;
+    }
+
+    try {
+      // Get all active sessions in this repo
+      const activeSessions = this.db.getSessionsByRepo(repoPath);
+
+      if (activeSessions.length === 0) {
+        logger.debug(`No active sessions to check for conflicts after merge of ${mergedBranch}`);
+        return;
+      }
+
+      logger.info(
+        `Checking ${activeSessions.length} active session(s) for conflicts after merge of ${mergedBranch} -> ${targetBranch}`
+      );
+
+      for (const session of activeSessions) {
+        // Skip if this session's branch was the one that got merged
+        if (session.worktree_name === mergedBranch) {
+          logger.debug(`Skipping session ${session.id} - its branch was just merged`);
+          continue;
+        }
+
+        try {
+          // Create conflict detector for this session's worktree
+          const detector = new ConflictDetector(
+            session.worktree_path,
+            this.autoFixEngine.astAnalyzer
+          );
+
+          // Detect conflicts between session branch and newly merged main
+          const conflictReport = await detector.detectConflicts({
+            currentBranch: session.worktree_name || 'HEAD',
+            targetBranch,
+            analyzeSemantics: true
+          });
+
+          if (conflictReport.hasConflicts) {
+            logger.info(
+              `Found ${conflictReport.conflicts.length} conflict(s) in session ${session.id} (${session.worktree_name}) after merge of ${mergedBranch}`
+            );
+
+            // Generate auto-fix suggestions for each conflict
+            for (const conflict of conflictReport.conflicts) {
+              try {
+                const suggestions = await this.autoFixEngine.generateSuggestions({
+                  repoPath: session.worktree_path,
+                  filePath: conflict.filePath,
+                  conflict,
+                  maxSuggestions: 3
+                });
+
+                logger.info(
+                  `Generated ${suggestions.length} auto-fix suggestion(s) for ${conflict.filePath} in session ${session.id}`
+                );
+
+                // Log top suggestion for visibility
+                if (suggestions.length > 0) {
+                  const topSuggestion = suggestions[0];
+                  logger.debug(
+                    `Top suggestion: ${topSuggestion.strategy_used} (confidence: ${(topSuggestion.confidence_score * 100).toFixed(1)}%)`
+                  );
+                }
+              } catch (error) {
+                logger.warn(
+                  `Failed to generate auto-fix suggestions for ${conflict.filePath} in session ${session.id}: ${error instanceof Error ? error.message : 'unknown error'}`
+                );
+              }
+            }
+          } else {
+            logger.debug(`No conflicts detected in session ${session.id} after merge of ${mergedBranch}`);
+          }
+        } catch (error) {
+          logger.warn(`Failed to check session ${session.id} for conflicts: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to detect conflicts in active sessions', error);
+    }
   }
 }
