@@ -81,7 +81,7 @@ describe('MCP Tools Smoke Tests', () => {
 
   describe('getMySession', () => {
     it('should return current session info', async () => {
-      const result = await getMySession({});
+      const result = await getMySession();
       expect(result.sessionId).toBeTruthy();
       expect(result).toHaveProperty('worktreePath');
       expect(result).toHaveProperty('parallelSessions');
@@ -89,7 +89,7 @@ describe('MCP Tools Smoke Tests', () => {
 
     it('should handle missing session ID', async () => {
       delete process.env.PARALLEL_CC_SESSION_ID;
-      const result = await getMySession({});
+      const result = await getMySession();
       expect(result.sessionId).toBeNull();
     });
   });
