@@ -266,7 +266,7 @@ Subscribe to notifications when a branch is merged to main.
 
 ## v0.4 - Branch Merge Detection & Rebase Assistance
 
-**Status:** Completed ✅ (Current Version)
+**Status:** Completed ✅
 
 ### Overview
 Proactively detect when parallel branches are merged and help coordinate rebases. Sessions can subscribe to merge notifications and Claude can assist with conflict checking and rebasing.
@@ -330,7 +330,7 @@ CREATE TABLE subscriptions (
 
 ## v0.5 - Advanced Conflict Resolution
 
-**Status:** Completed ✅
+**Status:** Completed ✅ (Current Version)
 
 **Implemented:** Comprehensive conflict resolution system with AST-based semantic analysis, file claims coordination, and AI-powered auto-fix suggestions.
 
