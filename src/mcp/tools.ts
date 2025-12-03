@@ -3,7 +3,17 @@
  */
 
 import { Coordinator } from '../coordinator.js';
+import { SessionDB } from '../db.js';
+import { FileClaimsManager, ConflictError } from '../file-claims.js';
+import { ConflictDetector } from '../conflict-detector.js';
+import { ASTAnalyzer } from '../ast-analyzer.js';
+import { AutoFixEngine } from '../auto-fix-engine.js';
+import { ConfidenceScorer } from '../confidence-scorer.js';
+import { createDefaultStrategyChain } from '../merge-strategies.js';
+import { logger as defaultLogger } from '../logger.js';
 import { execSync } from 'child_process';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 
 /**
  * Validate that a string is a valid git ref name to prevent command injection
@@ -30,7 +40,21 @@ import type {
   CheckConflictsInput,
   CheckConflictsOutput,
   RebaseAssistInput,
-  RebaseAssistOutput
+  RebaseAssistOutput,
+  ClaimFileInput,
+  ClaimFileOutput,
+  ReleaseFileInput,
+  ReleaseFileOutput,
+  ListFileClaimsInput,
+  ListFileClaimsOutput,
+  DetectAdvancedConflictsInput,
+  DetectAdvancedConflictsOutput,
+  GetAutoFixSuggestionsInput,
+  GetAutoFixSuggestionsOutput,
+  ApplyAutoFixInput,
+  ApplyAutoFixOutput,
+  ConflictHistoryInput,
+  ConflictHistoryOutput
 } from './schemas.js';
 
 /**
@@ -457,5 +481,510 @@ export async function rebaseAssist(
       conflictSummary: `Error during rebase: ${errorMessage}`,
       error: errorMessage
     };
+  }
+}
+
+// ============================================================================
+// v0.5 MCP Tools - File Claims, Advanced Conflicts, Auto-Fix
+// ============================================================================
+
+/**
+ * Claim a file to prevent concurrent edits
+ * v0.5: Acquire exclusive, shared, or intent claim on a file
+ */
+export async function claimFile(
+  input: ClaimFileInput
+): Promise<ClaimFileOutput> {
+  const sessionId = process.env.PARALLEL_CC_SESSION_ID;
+
+  if (!sessionId) {
+    return {
+      success: false,
+      claimId: null,
+      message: 'Not running in a parallel-cc managed session (PARALLEL_CC_SESSION_ID not set)'
+    };
+  }
+
+  const coordinator = new Coordinator();
+  try {
+    const repoPath = process.cwd();
+    const fileClaimsManager = new FileClaimsManager(coordinator['db'], defaultLogger);
+
+    try {
+      const claim = await fileClaimsManager.acquireClaim({
+        sessionId,
+        repoPath,
+        filePath: input.filePath,
+        mode: input.mode || 'EXCLUSIVE',
+        reason: input.reason,
+        ttlHours: input.ttlHours
+      });
+
+      return {
+        success: true,
+        claimId: claim.id,
+        message: `Successfully acquired ${claim.claim_mode} claim on ${input.filePath} (expires at ${claim.expires_at})`
+      };
+    } catch (error) {
+      if (error instanceof ConflictError) {
+        // Return conflicting claim details
+        const conflictingClaim = error.conflictingClaim;
+        const session = coordinator['db'].getSessionById(conflictingClaim.session_id);
+
+        return {
+          success: false,
+          claimId: null,
+          message: `Cannot acquire claim: ${error.message}`,
+          conflictingClaims: [{
+            claimId: conflictingClaim.id,
+            sessionId: conflictingClaim.session_id,
+            mode: conflictingClaim.claim_mode,
+            claimedAt: conflictingClaim.claimed_at,
+            expiresAt: conflictingClaim.expires_at
+          }],
+          escalationAvailable: input.mode === 'INTENT' || input.mode === 'SHARED'
+        };
+      }
+      throw error;
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      claimId: null,
+      message: `Failed to acquire claim: ${errorMessage}`
+    };
+  } finally {
+    coordinator.close();
+  }
+}
+
+/**
+ * Release a file claim
+ * v0.5: Release a previously acquired claim
+ */
+export async function releaseFile(
+  input: ReleaseFileInput
+): Promise<ReleaseFileOutput> {
+  const sessionId = process.env.PARALLEL_CC_SESSION_ID;
+
+  if (!sessionId) {
+    return {
+      success: false,
+      message: 'Not running in a parallel-cc managed session (PARALLEL_CC_SESSION_ID not set)'
+    };
+  }
+
+  const coordinator = new Coordinator();
+  try {
+    const fileClaimsManager = new FileClaimsManager(coordinator['db'], defaultLogger);
+
+    const released = await fileClaimsManager.releaseClaim(
+      input.claimId,
+      sessionId,
+      input.force
+    );
+
+    if (released) {
+      return {
+        success: true,
+        message: `Successfully released claim ${input.claimId}`,
+        releasedAt: new Date().toISOString()
+      };
+    } else {
+      return {
+        success: false,
+        message: `Claim ${input.claimId} not found or not owned by current session`
+      };
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `Failed to release claim: ${errorMessage}`
+    };
+  } finally {
+    coordinator.close();
+  }
+}
+
+/**
+ * List active file claims
+ * v0.5: Query file claims with filters
+ */
+export async function listFileClaims(
+  input: ListFileClaimsInput
+): Promise<ListFileClaimsOutput> {
+  const coordinator = new Coordinator();
+  try {
+    const repoPath = process.cwd();
+    const fileClaimsManager = new FileClaimsManager(coordinator['db'], defaultLogger);
+
+    const claims = fileClaimsManager.listClaims({
+      repoPath,
+      sessionId: input.sessionId,
+      filePaths: input.filePaths,
+      includeExpired: input.includeExpired
+    });
+
+    // Get session info for each claim
+    const claimsWithSessionInfo = claims.map(claim => {
+      const session = coordinator['db'].getSessionById(claim.session_id);
+      const now = new Date();
+      const expiresAt = new Date(claim.expires_at);
+      const minutesUntilExpiry = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / (1000 * 60)));
+
+      return {
+        claimId: claim.id,
+        filePath: claim.file_path,
+        claimMode: claim.claim_mode,
+        sessionId: claim.session_id,
+        sessionPid: session?.pid || 0,
+        worktreeName: session?.worktree_name || null,
+        claimedAt: claim.claimed_at,
+        expiresAt: claim.expires_at,
+        minutesUntilExpiry,
+        reason: claim.metadata?.reason as string | undefined
+      };
+    });
+
+    return {
+      claims: claimsWithSessionInfo,
+      totalClaims: claimsWithSessionInfo.length
+    };
+  } finally {
+    coordinator.close();
+  }
+}
+
+/**
+ * Detect advanced conflicts with semantic analysis
+ * v0.5: Use ConflictDetector for AST-based conflict classification
+ */
+export async function detectAdvancedConflicts(
+  input: DetectAdvancedConflictsInput
+): Promise<DetectAdvancedConflictsOutput> {
+  // Validate branch names
+  if (!isValidGitRef(input.currentBranch) || !isValidGitRef(input.targetBranch)) {
+    return {
+      hasConflicts: false,
+      conflicts: [],
+      summary: {
+        totalConflicts: 0,
+        byType: {},
+        bySeverity: {},
+        autoFixableCount: 0
+      }
+    };
+  }
+
+  const repoPath = process.cwd();
+  const astAnalyzer = new ASTAnalyzer();
+  const conflictDetector = new ConflictDetector(repoPath, astAnalyzer, defaultLogger);
+
+  try {
+    const report = await conflictDetector.detectConflicts({
+      currentBranch: input.currentBranch,
+      targetBranch: input.targetBranch,
+      analyzeSemantics: input.analyzeSemantics ?? true
+    });
+
+    // Estimate auto-fixable conflicts (TRIVIAL and some STRUCTURAL)
+    const autoFixableCount = report.conflicts.filter(
+      c => c.conflictType === 'TRIVIAL' || (c.conflictType === 'STRUCTURAL' && c.severity === 'LOW')
+    ).length;
+
+    return {
+      hasConflicts: report.hasConflicts,
+      conflicts: report.conflicts.map(c => ({
+        filePath: c.filePath,
+        conflictType: c.conflictType,
+        severity: c.severity,
+        markers: c.markers,
+        analysis: c.analysis
+      })),
+      summary: {
+        totalConflicts: report.summary.totalConflicts,
+        byType: report.summary.byType,
+        bySeverity: report.summary.bySeverity,
+        autoFixableCount
+      }
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      hasConflicts: false,
+      conflicts: [],
+      summary: {
+        totalConflicts: 0,
+        byType: { error: 1 },
+        bySeverity: {},
+        autoFixableCount: 0
+      }
+    };
+  }
+}
+
+/**
+ * Get auto-fix suggestions for conflicts
+ * v0.5: Generate AI-powered resolution suggestions
+ */
+export async function getAutoFixSuggestions(
+  input: GetAutoFixSuggestionsInput
+): Promise<GetAutoFixSuggestionsOutput> {
+  const repoPath = process.cwd();
+  const coordinator = new Coordinator();
+
+  try {
+    // Detect conflicts first
+    const astAnalyzer = new ASTAnalyzer();
+    const conflictDetector = new ConflictDetector(repoPath, astAnalyzer, defaultLogger);
+
+    const report = await conflictDetector.detectConflicts({
+      currentBranch: input.currentBranch,
+      targetBranch: input.targetBranch,
+      analyzeSemantics: true
+    });
+
+    // Find conflict for the requested file
+    const conflict = report.conflicts.find(c => c.filePath === input.filePath);
+    if (!conflict) {
+      return {
+        suggestions: [],
+        totalGenerated: 0,
+        filteredByConfidence: 0
+      };
+    }
+
+    // Generate suggestions
+    const confidenceScorer = new ConfidenceScorer(astAnalyzer, defaultLogger);
+    const strategyChain = createDefaultStrategyChain(astAnalyzer);
+    const autoFixEngine = new AutoFixEngine(
+      coordinator['db'],
+      astAnalyzer,
+      confidenceScorer,
+      strategyChain,
+      defaultLogger
+    );
+
+    const allSuggestions = await autoFixEngine.generateSuggestions({
+      repoPath,
+      filePath: input.filePath,
+      conflict,
+      maxSuggestions: input.maxSuggestions || 3
+    });
+
+    const minConfidence = input.minConfidence ?? 0.5;
+    const filtered = allSuggestions.filter(s => s.confidence_score >= minConfidence);
+
+    // Generate preview for each suggestion
+    const suggestions = filtered.map(s => {
+      const beforeLines = s.source_content.split('\n');
+      const afterLines = s.suggested_resolution.split('\n');
+
+      const linesAdded = afterLines.filter(line => !beforeLines.includes(line)).length;
+      const linesRemoved = beforeLines.filter(line => !afterLines.includes(line)).length;
+
+      const canAutoApply = s.confidence_score >= 0.7;
+      const risks: string[] = [];
+
+      if (s.confidence_score < 0.8) {
+        risks.push('Medium confidence - review carefully before applying');
+      }
+      if (conflict.severity === 'HIGH') {
+        risks.push('High severity conflict - may require manual review');
+      }
+      if (conflict.conflictType === 'SEMANTIC') {
+        risks.push('Semantic conflict - verify business logic after applying');
+      }
+
+      return {
+        suggestionId: s.id,
+        confidence: s.confidence_score,
+        strategy: s.strategy_used,
+        explanation: s.explanation,
+        preview: {
+          beforeLines: beforeLines.slice(0, 10),
+          afterLines: afterLines.slice(0, 10),
+          diffStats: {
+            linesAdded,
+            linesRemoved
+          }
+        },
+        conflictType: s.conflict_type,
+        canAutoApply,
+        risks
+      };
+    });
+
+    return {
+      suggestions,
+      totalGenerated: allSuggestions.length,
+      filteredByConfidence: allSuggestions.length - filtered.length
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to generate suggestions: ${errorMessage}`);
+  } finally {
+    coordinator.close();
+  }
+}
+
+/**
+ * Apply an auto-fix suggestion
+ * v0.5: Apply AI-generated resolution with safety checks
+ */
+export async function applyAutoFix(
+  input: ApplyAutoFixInput
+): Promise<ApplyAutoFixOutput> {
+  const coordinator = new Coordinator();
+
+  try {
+    const repoPath = process.cwd();
+    const astAnalyzer = new ASTAnalyzer();
+    const confidenceScorer = new ConfidenceScorer(astAnalyzer, defaultLogger);
+    const strategyChain = createDefaultStrategyChain(astAnalyzer);
+
+    const autoFixEngine = new AutoFixEngine(
+      coordinator['db'],
+      astAnalyzer,
+      confidenceScorer,
+      strategyChain,
+      defaultLogger
+    );
+
+    const result = await autoFixEngine.applySuggestion({
+      suggestionId: input.suggestionId,
+      dryRun: input.dryRun ?? false,
+      createBackup: input.createBackup ?? true
+    });
+
+    return {
+      success: result.success,
+      applied: result.applied,
+      message: result.success
+        ? `Auto-fix ${result.applied ? 'applied' : 'validated'} successfully`
+        : result.error || 'Failed to apply auto-fix',
+      filePath: result.filePath,
+      backupPath: result.backupPath,
+      rollbackCommand: result.rollbackCommand,
+      verification: result.verification,
+      metadata: result.metadata
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      applied: false,
+      message: `Failed to apply auto-fix: ${errorMessage}`,
+      filePath: '',
+      verification: {
+        conflictMarkersRemaining: -1,
+        syntaxValid: false,
+        diffStats: { linesChanged: 0 }
+      },
+      metadata: {
+        suggestionId: input.suggestionId,
+        confidence: 0,
+        strategy: 'unknown',
+        appliedAt: new Date().toISOString()
+      }
+    };
+  } finally {
+    coordinator.close();
+  }
+}
+
+/**
+ * Get conflict resolution history with statistics
+ * v0.5: Query conflict resolutions and calculate metrics
+ */
+export async function conflictHistory(
+  input: ConflictHistoryInput
+): Promise<ConflictHistoryOutput> {
+  const coordinator = new Coordinator();
+
+  try {
+    const repoPath = process.cwd();
+
+    // Get conflict resolutions
+    const allResolutions = coordinator['db'].getConflictResolutions({
+      repo_path: repoPath,
+      file_path: input.filePath,
+      conflict_type: input.conflictType,
+      resolution_strategy: input.resolutionStrategy
+    });
+
+    // Paginate
+    const offset = input.offset ?? 0;
+    const limit = input.limit ?? 20;
+    const paginatedResolutions = allResolutions.slice(offset, offset + limit);
+
+    // Get suggestions for each resolution to fetch strategies
+    const history = paginatedResolutions.map(r => {
+      let autoFixStrategy: string | undefined;
+      let explanation: string | undefined;
+
+      if (r.auto_fix_suggestion_id) {
+        const suggestions = coordinator['db'].getAutoFixSuggestions({
+          id: r.auto_fix_suggestion_id
+        });
+        if (suggestions.length > 0) {
+          autoFixStrategy = suggestions[0].strategy_used;
+          explanation = suggestions[0].explanation;
+        }
+      }
+
+      return {
+        resolutionId: r.id,
+        filePath: r.file_path,
+        conflictType: r.conflict_type,
+        resolutionStrategy: r.resolution_strategy,
+        confidence: r.confidence_score,
+        detectedAt: r.detected_at,
+        resolvedAt: r.resolved_at,
+        autoFixStrategy,
+        wasAutoApplied: r.resolution_strategy === 'AUTO_FIX',
+        explanation
+      };
+    });
+
+    // Calculate statistics
+    const totalResolutions = allResolutions.length;
+    const autoFixCount = allResolutions.filter(r => r.resolution_strategy === 'AUTO_FIX').length;
+    const autoFixRate = totalResolutions > 0 ? autoFixCount / totalResolutions : 0;
+
+    const confidenceScores = allResolutions
+      .filter(r => r.confidence_score !== null && r.confidence_score !== undefined)
+      .map(r => r.confidence_score as number);
+    const averageConfidence = confidenceScores.length > 0
+      ? confidenceScores.reduce((a, b) => a + b, 0) / confidenceScores.length
+      : 0;
+
+    const byType: Record<string, number> = {};
+    const byStrategy: Record<string, number> = {};
+
+    allResolutions.forEach(r => {
+      byType[r.conflict_type] = (byType[r.conflict_type] || 0) + 1;
+      byStrategy[r.resolution_strategy] = (byStrategy[r.resolution_strategy] || 0) + 1;
+    });
+
+    return {
+      history,
+      statistics: {
+        totalResolutions,
+        autoFixRate,
+        averageConfidence,
+        byType,
+        byStrategy
+      },
+      pagination: {
+        offset,
+        limit,
+        total: totalResolutions
+      }
+    };
+  } finally {
+    coordinator.close();
   }
 }

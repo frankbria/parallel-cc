@@ -186,3 +186,246 @@ export interface BranchStatus {
   behindBy: number;
   aheadBy: number;
 }
+
+// ============================================================================
+// v0.5 Types - File Claims, Conflict Resolution, Auto-Fix Suggestions
+// ============================================================================
+
+/**
+ * Claim mode for file access locks
+ */
+export type ClaimMode = 'EXCLUSIVE' | 'SHARED' | 'INTENT';
+
+/**
+ * Type of conflict detected
+ */
+export type ConflictType = 'STRUCTURAL' | 'SEMANTIC' | 'CONCURRENT_EDIT' | 'TRIVIAL' | 'UNKNOWN';
+
+/**
+ * Strategy used to resolve a conflict
+ */
+export type ResolutionStrategy = 'AUTO_FIX' | 'MANUAL' | 'HYBRID' | 'ABANDONED';
+
+/**
+ * Database row for file_claims table
+ */
+export interface FileClaimRow {
+  id: string;
+  session_id: string;
+  repo_path: string;
+  file_path: string;
+  claim_mode: ClaimMode;
+  claimed_at: string;
+  expires_at: string;
+  last_heartbeat: string;
+  escalated_from: string | null;
+  metadata: string | null;
+  is_active: number; // SQLite boolean (0/1)
+  released_at: string | null;
+  deleted_at: string | null;
+  deleted_reason: string | null;
+}
+
+/**
+ * File claim model (TypeScript booleans)
+ */
+export interface FileClaim {
+  id: string;
+  session_id: string;
+  repo_path: string;
+  file_path: string;
+  claim_mode: ClaimMode;
+  claimed_at: string;
+  expires_at: string;
+  last_heartbeat: string;
+  escalated_from?: string;
+  metadata?: Record<string, unknown>;
+  is_active: boolean;
+  released_at?: string;
+  deleted_at?: string;
+  deleted_reason?: string;
+}
+
+/**
+ * Database row for conflict_resolutions table
+ */
+export interface ConflictResolutionRow {
+  id: string;
+  session_id: string | null;
+  repo_path: string;
+  file_path: string;
+  conflict_type: ConflictType;
+  base_commit: string;
+  source_commit: string;
+  target_commit: string;
+  resolution_strategy: ResolutionStrategy;
+  confidence_score: number | null;
+  conflict_markers: string;
+  resolved_content: string | null;
+  detected_at: string;
+  resolved_at: string | null;
+  auto_fix_suggestion_id: string | null;
+  metadata: string | null;
+  deleted_at: string | null;
+  deleted_reason: string | null;
+}
+
+/**
+ * Conflict resolution model (TypeScript types)
+ */
+export interface ConflictResolution {
+  id: string;
+  session_id?: string;
+  repo_path: string;
+  file_path: string;
+  conflict_type: ConflictType;
+  base_commit: string;
+  source_commit: string;
+  target_commit: string;
+  resolution_strategy: ResolutionStrategy;
+  confidence_score?: number;
+  conflict_markers: string;
+  resolved_content?: string;
+  detected_at: string;
+  resolved_at?: string;
+  auto_fix_suggestion_id?: string;
+  metadata?: Record<string, unknown>;
+  deleted_at?: string;
+  deleted_reason?: string;
+}
+
+/**
+ * Database row for auto_fix_suggestions table
+ */
+export interface AutoFixSuggestionRow {
+  id: string;
+  conflict_resolution_id: string | null;
+  repo_path: string;
+  file_path: string;
+  conflict_type: ConflictType;
+  suggested_resolution: string;
+  confidence_score: number;
+  explanation: string;
+  strategy_used: string;
+  base_content: string;
+  source_content: string;
+  target_content: string;
+  generated_at: string;
+  applied_at: string | null;
+  was_auto_applied: number; // SQLite boolean (0/1)
+  metadata: string | null;
+  deleted_at: string | null;
+  deleted_reason: string | null;
+}
+
+/**
+ * Auto-fix suggestion model (TypeScript types)
+ */
+export interface AutoFixSuggestion {
+  id: string;
+  conflict_resolution_id?: string;
+  repo_path: string;
+  file_path: string;
+  conflict_type: ConflictType;
+  suggested_resolution: string;
+  confidence_score: number;
+  explanation: string;
+  strategy_used: string;
+  base_content: string;
+  source_content: string;
+  target_content: string;
+  generated_at: string;
+  applied_at?: string;
+  was_auto_applied: boolean;
+  metadata?: Record<string, unknown>;
+  deleted_at?: string;
+  deleted_reason?: string;
+}
+
+/**
+ * Parameters for acquiring a file claim
+ */
+export interface AcquireClaimParams {
+  session_id: string;
+  repo_path: string;
+  file_path: string;
+  claim_mode: ClaimMode;
+  ttl_hours?: number; // Default: 24
+  escalated_from?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Filters for querying file claims
+ */
+export interface ClaimFilters {
+  session_id?: string;
+  repo_path?: string;
+  file_path?: string;
+  claim_mode?: ClaimMode;
+  is_active?: boolean;
+  include_stale?: boolean;
+}
+
+/**
+ * Parameters for creating a conflict resolution
+ */
+export interface CreateConflictResolutionParams {
+  session_id?: string;
+  repo_path: string;
+  file_path: string;
+  conflict_type: ConflictType;
+  base_commit: string;
+  source_commit: string;
+  target_commit: string;
+  resolution_strategy: ResolutionStrategy;
+  confidence_score?: number;
+  conflict_markers: string;
+  resolved_content?: string;
+  auto_fix_suggestion_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Filters for querying conflict resolutions
+ */
+export interface ConflictFilters {
+  session_id?: string;
+  repo_path?: string;
+  file_path?: string;
+  conflict_type?: ConflictType;
+  resolution_strategy?: ResolutionStrategy;
+  is_resolved?: boolean;
+  min_confidence?: number;
+}
+
+/**
+ * Parameters for creating an auto-fix suggestion
+ */
+export interface CreateAutoFixSuggestionParams {
+  conflict_resolution_id?: string;
+  repo_path: string;
+  file_path: string;
+  conflict_type: ConflictType;
+  suggested_resolution: string;
+  confidence_score: number;
+  explanation: string;
+  strategy_used: string;
+  base_content: string;
+  source_content: string;
+  target_content: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Filters for querying auto-fix suggestions
+ */
+export interface SuggestionFilters {
+  id?: string;
+  conflict_resolution_id?: string;
+  repo_path?: string;
+  file_path?: string;
+  conflict_type?: ConflictType;
+  is_applied?: boolean;
+  min_confidence?: number;
+}

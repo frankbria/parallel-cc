@@ -83,6 +83,9 @@ describe('Coordinator', () => {
       autoCleanupWorktrees: true,
       worktreePrefix: 'parallel-'
     });
+
+    // Run v0.5.0 migration for file_claims support
+    await coordinator['db'].migrateToV05();
   });
 
   afterEach(() => {
@@ -102,13 +105,13 @@ describe('Coordinator', () => {
   });
 
   describe('constructor', () => {
-    it('should create with default config', () => {
+    it('should create with default config', async () => {
       const defaultCoord = new Coordinator();
       expect(defaultCoord).toBeInstanceOf(Coordinator);
       defaultCoord.close();
     });
 
-    it('should merge custom config with defaults', () => {
+    it('should merge custom config with defaults', async () => {
       const customCoord = new Coordinator({
         dbPath: TEST_DB_PATH,
         staleThresholdMinutes: 5
@@ -117,7 +120,7 @@ describe('Coordinator', () => {
       customCoord.close();
     });
 
-    it('should create database at custom path', () => {
+    it('should create database at custom path', async () => {
       const customDbPath = path.join(TEST_DIR, 'custom', 'coord.db');
       const customCoord = new Coordinator({ dbPath: customDbPath });
       expect(fs.existsSync(customDbPath)).toBe(true);
@@ -126,8 +129,8 @@ describe('Coordinator', () => {
   });
 
   describe('register', () => {
-    it('should register first session in main repo', () => {
-      const result = coordinator.register(TEST_REPO_PATH, 12345);
+    it('should register first session in main repo', async () => {
+      const result = await coordinator.register(TEST_REPO_PATH, 12345);
 
       expect(result.isNew).toBe(true);
       expect(result.isMainRepo).toBe(true);
@@ -137,13 +140,13 @@ describe('Coordinator', () => {
       expect(result.sessionId).toBeTruthy();
     });
 
-    it('should create worktree when parallel session exists', () => {
+    it('should create worktree when parallel session exists', async () => {
       // Register first session
-      const first = coordinator.register(TEST_REPO_PATH, 12345);
+      const first = await coordinator.register(TEST_REPO_PATH, 12345);
       expect(first.isMainRepo).toBe(true);
 
       // Register parallel session
-      const second = coordinator.register(TEST_REPO_PATH, 12346);
+      const second = await coordinator.register(TEST_REPO_PATH, 12346);
 
       expect(second.isNew).toBe(true);
       expect(second.isMainRepo).toBe(false);
@@ -156,38 +159,38 @@ describe('Coordinator', () => {
       expect(GtrWrapper.prototype.getWorktreePath).toHaveBeenCalled();
     });
 
-    it('should return existing session info when same PID registers again', () => {
+    it('should return existing session info when same PID registers again', async () => {
       // Register session
-      const first = coordinator.register(TEST_REPO_PATH, 12345);
+      const first = await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Re-register with same PID
-      const second = coordinator.register(TEST_REPO_PATH, 12345);
+      const second = await coordinator.register(TEST_REPO_PATH, 12345);
 
       expect(second.isNew).toBe(false);
       expect(second.sessionId).toBe(first.sessionId);
       expect(second.worktreePath).toBe(first.worktreePath);
     });
 
-    it('should throw on invalid repo path', () => {
-      expect(() => coordinator.register('', 12345)).toThrow('Invalid repository path');
-      expect(() => coordinator.register(null as any, 12345)).toThrow('Invalid repository path');
+    it('should throw on invalid repo path', async () => {
+      await expect(coordinator.register('', 12345)).rejects.toThrow('Invalid repository path');
+      await expect(coordinator.register(null as any, 12345)).rejects.toThrow('Invalid repository path');
     });
 
-    it('should throw on invalid PID (0)', () => {
-      expect(() => coordinator.register(TEST_REPO_PATH, 0)).toThrow('Invalid process ID');
+    it('should throw on invalid PID (0)', async () => {
+      await expect(coordinator.register(TEST_REPO_PATH, 0)).rejects.toThrow('Invalid process ID');
     });
 
-    it('should throw on invalid PID (negative)', () => {
-      expect(() => coordinator.register(TEST_REPO_PATH, -1)).toThrow('Invalid process ID');
+    it('should throw on invalid PID (negative)', async () => {
+      await expect(coordinator.register(TEST_REPO_PATH, -1)).rejects.toThrow('Invalid process ID');
     });
 
-    it('should throw on invalid PID (> MAX_INT)', () => {
-      expect(() => coordinator.register(TEST_REPO_PATH, 2147483648)).toThrow('Invalid process ID');
+    it('should throw on invalid PID (> MAX_INT)', async () => {
+      await expect(coordinator.register(TEST_REPO_PATH, 2147483648)).rejects.toThrow('Invalid process ID');
     });
 
-    it('should continue in main repo with warning when worktree creation fails', () => {
+    it('should continue in main repo with warning when worktree creation fails', async () => {
       // Register first session
-      coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Mock worktree creation failure
       const MockedGtrWrapper = vi.mocked(GtrWrapper);
@@ -198,7 +201,7 @@ describe('Coordinator', () => {
       }));
 
       // Register parallel session
-      const second = coordinator.register(TEST_REPO_PATH, 12346);
+      const second = await coordinator.register(TEST_REPO_PATH, 12346);
 
       // Should still register but in main repo
       expect(second.isNew).toBe(true);
@@ -211,11 +214,11 @@ describe('Coordinator', () => {
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Continuing in main repo'));
     });
 
-    it('should prevent race conditions with concurrent registrations', () => {
+    it('should prevent race conditions with concurrent registrations', async () => {
       // This test verifies that the transaction prevents race conditions
       // Register two sessions "concurrently" (in practice, sequentially due to transaction)
-      const first = coordinator.register(TEST_REPO_PATH, 12345);
-      const second = coordinator.register(TEST_REPO_PATH, 12346);
+      const first = await coordinator.register(TEST_REPO_PATH, 12345);
+      const second = await coordinator.register(TEST_REPO_PATH, 12346);
 
       // Second should see first session and create worktree
       expect(first.isMainRepo).toBe(true);
@@ -223,9 +226,9 @@ describe('Coordinator', () => {
       expect(second.parallelSessions).toBe(2);
     });
 
-    it('should filter dead processes when checking for parallel sessions', () => {
+    it('should filter dead processes when checking for parallel sessions', async () => {
       // Register first session with a PID that will be "dead"
-      coordinator.register(TEST_REPO_PATH, 99999);
+      await coordinator.register(TEST_REPO_PATH, 99999);
 
       // Mock process.kill to return false for PID 99999 (dead)
       processKillSpy.mockImplementation((pid: number, signal: number | string = 0) => {
@@ -236,7 +239,7 @@ describe('Coordinator', () => {
       });
 
       // Register second session - should not see dead session as parallel
-      const second = coordinator.register(TEST_REPO_PATH, 12345);
+      const second = await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Should be in main repo since the first session is dead
       expect(second.isMainRepo).toBe(true);
@@ -244,20 +247,20 @@ describe('Coordinator', () => {
   });
 
   describe('heartbeat', () => {
-    it('should return true when session exists', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
+    it('should return true when session exists', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const result = coordinator.heartbeat(12345);
       expect(result).toBe(true);
     });
 
-    it('should return false when session does not exist', () => {
+    it('should return false when session does not exist', async () => {
       const result = coordinator.heartbeat(99999);
       expect(result).toBe(false);
     });
 
-    it('should update last_heartbeat timestamp', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
+    it('should update last_heartbeat timestamp', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Get initial status
       const status1 = coordinator.status(TEST_REPO_PATH);
@@ -280,10 +283,10 @@ describe('Coordinator', () => {
   });
 
   describe('release', () => {
-    it('should release main repo session without worktree cleanup', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
+    it('should release main repo session without worktree cleanup', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
-      const result = coordinator.release(12345);
+      const result = await coordinator.release(12345);
 
       expect(result.released).toBe(true);
       expect(result.worktreeRemoved).toBe(false);
@@ -293,12 +296,12 @@ describe('Coordinator', () => {
       expect(status.totalSessions).toBe(0);
     });
 
-    it('should release worktree session and cleanup worktree when autoCleanupWorktrees=true', () => {
+    it('should release worktree session and cleanup worktree when autoCleanupWorktrees=true', async () => {
       // Create parallel sessions
-      coordinator.register(TEST_REPO_PATH, 12345);
-      coordinator.register(TEST_REPO_PATH, 12346);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12346);
 
-      const result = coordinator.release(12346);
+      const result = await coordinator.release(12346);
 
       expect(result.released).toBe(true);
       expect(result.worktreeRemoved).toBe(true);
@@ -307,21 +310,24 @@ describe('Coordinator', () => {
       expect(GtrWrapper.prototype.removeWorktree).toHaveBeenCalled();
     });
 
-    it('should not cleanup worktree when autoCleanupWorktrees=false', () => {
+    it('should not cleanup worktree when autoCleanupWorktrees=false', async () => {
       // Create coordinator with autoCleanupWorktrees disabled
       const noCleanupCoord = new Coordinator({
         dbPath: path.join(TEST_DIR, 'no-cleanup.db'),
         autoCleanupWorktrees: false
       });
 
+      // Run migration
+      await noCleanupCoord['db'].migrateToV05();
+
       // Create parallel sessions
-      noCleanupCoord.register(TEST_REPO_PATH, 12345);
-      noCleanupCoord.register(TEST_REPO_PATH, 12346);
+      await noCleanupCoord.register(TEST_REPO_PATH, 12345);
+      await noCleanupCoord.register(TEST_REPO_PATH, 12346);
 
       // Clear mock calls from registration
       vi.clearAllMocks();
 
-      const result = noCleanupCoord.release(12346);
+      const result = await noCleanupCoord.release(12346);
 
       expect(result.released).toBe(true);
       expect(result.worktreeRemoved).toBe(false);
@@ -332,17 +338,17 @@ describe('Coordinator', () => {
       noCleanupCoord.close();
     });
 
-    it('should return released=false for non-existent session', () => {
-      const result = coordinator.release(99999);
+    it('should return released=false for non-existent session', async () => {
+      const result = await coordinator.release(99999);
 
       expect(result.released).toBe(false);
       expect(result.worktreeRemoved).toBe(false);
     });
 
-    it('should still delete session record even if worktree cleanup fails', () => {
+    it('should still delete session record even if worktree cleanup fails', async () => {
       // Create parallel sessions
-      coordinator.register(TEST_REPO_PATH, 12345);
-      coordinator.register(TEST_REPO_PATH, 12346);
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12346);
 
       // Mock worktree removal failure
       const MockedGtrWrapper = vi.mocked(GtrWrapper);
@@ -352,7 +358,7 @@ describe('Coordinator', () => {
         error: 'Failed to remove worktree'
       }));
 
-      const result = coordinator.release(12346);
+      const result = await coordinator.release(12346);
 
       expect(result.released).toBe(true);
       expect(result.worktreeRemoved).toBe(false);
@@ -364,9 +370,9 @@ describe('Coordinator', () => {
   });
 
   describe('status', () => {
-    it('should return sessions for specific repo only', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
-      coordinator.register(TEST_REPO_PATH_2, 12346);
+    it('should return sessions for specific repo only', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH_2, 12346);
 
       const status = coordinator.status(TEST_REPO_PATH);
 
@@ -375,9 +381,9 @@ describe('Coordinator', () => {
       expect(status.sessions[0].pid).toBe(12345);
     });
 
-    it('should return all sessions when no repo specified', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
-      coordinator.register(TEST_REPO_PATH_2, 12346);
+    it('should return all sessions when no repo specified', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH_2, 12346);
 
       const status = coordinator.status();
 
@@ -385,9 +391,9 @@ describe('Coordinator', () => {
       expect(status.totalSessions).toBe(2);
     });
 
-    it('should correctly identify alive vs dead processes', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
-      coordinator.register(TEST_REPO_PATH, 99999);
+    it('should correctly identify alive vs dead processes', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 99999);
 
       // Mock process.kill to identify 99999 as dead
       processKillSpy.mockImplementation((pid: number, signal: number | string = 0) => {
@@ -404,8 +410,8 @@ describe('Coordinator', () => {
       expect(status.sessions.find(s => s.pid === 99999)?.isAlive).toBe(false);
     });
 
-    it('should calculate correct duration in minutes', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
+    it('should calculate correct duration in minutes', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const status = coordinator.status(TEST_REPO_PATH);
 
@@ -415,8 +421,8 @@ describe('Coordinator', () => {
       expect(Number.isFinite(status.sessions[0].durationMinutes)).toBe(true);
     });
 
-    it('should include all session info fields', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
+    it('should include all session info fields', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
 
       const status = coordinator.status(TEST_REPO_PATH);
       const session = status.sessions[0];
@@ -449,7 +455,7 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 60 // Don't cleanup during register
       });
 
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for 2 seconds to ensure timestamp difference (SQLite has second-level precision)
@@ -461,7 +467,10 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 0
       });
 
-      const result = shortStaleCoord.cleanup();
+      // Run migration for new database
+      await shortStaleCoord['db'].migrateToV05();
+
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.removed).toBe(1);
       expect(result.sessions).toHaveLength(1);
@@ -476,7 +485,7 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 60
       });
 
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -497,7 +506,10 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 0
       });
 
-      const result = cleanupCoord.cleanup();
+      // Run migration for new database
+      await cleanupCoord['db'].migrateToV05();
+
+      const result = await cleanupCoord.cleanup();
 
       // Session should have been removed (either during constructor or explicit cleanup)
       expect(result.removed).toBeGreaterThanOrEqual(0); // May be 0 if already cleaned up during constructor
@@ -518,8 +530,8 @@ describe('Coordinator', () => {
       });
 
       // Register parallel sessions
-      normalCoord.register(TEST_REPO_PATH, 12345);
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 12345);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -532,6 +544,9 @@ describe('Coordinator', () => {
         autoCleanupWorktrees: true
       });
 
+      // Run migration for new database
+      await shortStaleCoord['db'].migrateToV05();
+
       // Clear mocks from registration
       vi.clearAllMocks();
 
@@ -543,7 +558,7 @@ describe('Coordinator', () => {
         return true;
       });
 
-      const result = shortStaleCoord.cleanup();
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.worktreesRemoved.length).toBeGreaterThan(0);
       expect(GtrWrapper.prototype.removeWorktree).toHaveBeenCalled();
@@ -558,7 +573,7 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 60
       });
 
-      normalCoord.register(TEST_REPO_PATH, 12345);
+      await normalCoord.register(TEST_REPO_PATH, 12345);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -575,7 +590,7 @@ describe('Coordinator', () => {
         return true; // All processes are alive
       });
 
-      const result = shortStaleCoord.cleanup();
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.removed).toBe(0);
       expect(result.sessions).toHaveLength(0);
@@ -592,8 +607,8 @@ describe('Coordinator', () => {
       });
 
       // Register parallel sessions
-      normalCoord.register(TEST_REPO_PATH, 12345);
-      normalCoord.register(TEST_REPO_PATH, 99999);
+      await normalCoord.register(TEST_REPO_PATH, 12345);
+      await normalCoord.register(TEST_REPO_PATH, 99999);
       normalCoord.close();
 
       // Wait for timestamp difference
@@ -605,6 +620,9 @@ describe('Coordinator', () => {
         staleThresholdMinutes: 0,
         autoCleanupWorktrees: true
       });
+
+      // Run migration for new database
+      await shortStaleCoord['db'].migrateToV05();
 
       // Mock worktree removal failure
       const MockedGtrWrapper = vi.mocked(GtrWrapper);
@@ -622,7 +640,7 @@ describe('Coordinator', () => {
         return true;
       });
 
-      const result = shortStaleCoord.cleanup();
+      const result = await shortStaleCoord.cleanup();
 
       expect(result.removed).toBeGreaterThan(0);
       expect(result.worktreesRemoved).toHaveLength(0);
@@ -636,7 +654,7 @@ describe('Coordinator', () => {
     it('should use git rev-parse to get canonical path', async () => {
       const { execSync } = await import('child_process');
 
-      const result = coordinator.register(TEST_REPO_PATH, 12345);
+      const result = await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Should have called execSync with git rev-parse
       expect(execSync).toHaveBeenCalledWith(
@@ -655,7 +673,7 @@ describe('Coordinator', () => {
         throw new Error('not a git repository');
       });
 
-      const result = coordinator.register(TEST_REPO_PATH, 12345);
+      const result = await coordinator.register(TEST_REPO_PATH, 12345);
 
       // Should use original path
       expect(result.worktreePath).toBe(TEST_REPO_PATH);
@@ -664,26 +682,26 @@ describe('Coordinator', () => {
   });
 
   describe('close', () => {
-    it('should close database connection', () => {
+    it('should close database connection', async () => {
       const testCoord = new Coordinator({
         dbPath: path.join(TEST_DIR, 'close-test.db')
       });
 
       // Register a session
-      testCoord.register(TEST_REPO_PATH, 12345);
+      await testCoord.register(TEST_REPO_PATH, 12345);
 
       // Close should not throw
       expect(() => testCoord.close()).not.toThrow();
 
       // Further operations should fail
-      expect(() => testCoord.register(TEST_REPO_PATH, 12346)).toThrow();
+      await expect(testCoord.register(TEST_REPO_PATH, 12346)).rejects.toThrow();
     });
   });
 
   describe('integration scenarios', () => {
-    it('should handle complete lifecycle: register -> heartbeat -> status -> release', () => {
+    it('should handle complete lifecycle: register -> heartbeat -> status -> release', async () => {
       // Register
-      const registerResult = coordinator.register(TEST_REPO_PATH, 12345);
+      const registerResult = await coordinator.register(TEST_REPO_PATH, 12345);
       expect(registerResult.isNew).toBe(true);
 
       // Heartbeat
@@ -695,7 +713,7 @@ describe('Coordinator', () => {
       expect(statusResult.totalSessions).toBe(1);
 
       // Release
-      const releaseResult = coordinator.release(12345);
+      const releaseResult = await coordinator.release(12345);
       expect(releaseResult.released).toBe(true);
 
       // Verify cleanup
@@ -703,11 +721,11 @@ describe('Coordinator', () => {
       expect(finalStatus.totalSessions).toBe(0);
     });
 
-    it('should handle multiple parallel sessions correctly', () => {
+    it('should handle multiple parallel sessions correctly', async () => {
       // Register 3 sessions
-      const s1 = coordinator.register(TEST_REPO_PATH, 12345);
-      const s2 = coordinator.register(TEST_REPO_PATH, 12346);
-      const s3 = coordinator.register(TEST_REPO_PATH, 12347);
+      const s1 = await coordinator.register(TEST_REPO_PATH, 12345);
+      const s2 = await coordinator.register(TEST_REPO_PATH, 12346);
+      const s3 = await coordinator.register(TEST_REPO_PATH, 12347);
 
       expect(s1.isMainRepo).toBe(true);
       expect(s2.isMainRepo).toBe(false);
@@ -717,17 +735,17 @@ describe('Coordinator', () => {
       expect(status.totalSessions).toBe(3);
 
       // Release middle session
-      coordinator.release(12346);
+      await coordinator.release(12346);
 
       const status2 = coordinator.status(TEST_REPO_PATH);
       expect(status2.totalSessions).toBe(2);
     });
 
-    it('should handle multiple repos independently', () => {
-      coordinator.register(TEST_REPO_PATH, 12345);
-      coordinator.register(TEST_REPO_PATH, 12346);
-      coordinator.register(TEST_REPO_PATH_2, 12347);
-      coordinator.register(TEST_REPO_PATH_2, 12348);
+    it('should handle multiple repos independently', async () => {
+      await coordinator.register(TEST_REPO_PATH, 12345);
+      await coordinator.register(TEST_REPO_PATH, 12346);
+      await coordinator.register(TEST_REPO_PATH_2, 12347);
+      await coordinator.register(TEST_REPO_PATH_2, 12348);
 
       const status1 = coordinator.status(TEST_REPO_PATH);
       const status2 = coordinator.status(TEST_REPO_PATH_2);

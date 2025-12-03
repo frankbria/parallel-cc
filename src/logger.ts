@@ -9,7 +9,7 @@ export enum LogLevel {
   DEBUG = 3
 }
 
-class Logger {
+export class Logger {
   private level: LogLevel;
 
   constructor() {

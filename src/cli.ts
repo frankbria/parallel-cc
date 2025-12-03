@@ -59,10 +59,10 @@ program
   .requiredOption('--repo <path>', 'Repository path')
   .requiredOption('--pid <number>', 'Process ID', parseInt)
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action(async (options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.register(options.repo, options.pid);
+      const result = await coordinator.register(options.repo, options.pid);
 
       if (options.json) {
         console.log(JSON.stringify(result));
@@ -125,10 +125,10 @@ program
   .description('Release a session and cleanup worktree')
   .requiredOption('--pid <number>', 'Process ID', parseInt)
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action(async (options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.release(options.pid);
+      const result = await coordinator.release(options.pid);
 
       if (options.json) {
         console.log(JSON.stringify(result));
@@ -214,10 +214,10 @@ program
   .command('cleanup')
   .description('Remove stale sessions and orphaned worktrees')
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action(async (options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.cleanup();
+      const result = await coordinator.cleanup();
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
@@ -865,6 +865,233 @@ program
       process.exit(1);
     } finally {
       db.close();
+    }
+  });
+
+/**
+ * Database migration to v0.5 (v0.5)
+ * Migrate database schema to support file claims and conflict resolution
+ */
+program
+  .command('migrate')
+  .description('Run database migration to v0.5 schema')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    try {
+      await coordinator['db'].migrateToV05();
+
+      if (options.json) {
+        console.log(JSON.stringify({ success: true, message: 'Migration to v0.5 completed' }));
+      } else {
+        console.log(chalk.green('✓ Migration to v0.5 completed successfully'));
+        console.log(chalk.dim('  Added tables: file_claims, conflict_resolutions, auto_fix_suggestions'));
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Migration failed: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * List active file claims (v0.5)
+ */
+program
+  .command('claims')
+  .description('List active file claims (v0.5)')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--session <id>', 'Filter by session ID')
+  .option('--file <path>', 'Filter by file path')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const coordinator = new Coordinator();
+    try {
+      const claims = coordinator['db'].listClaims({
+        repo_path: options.repo,
+        session_id: options.session,
+        file_path: options.file,
+        is_active: true
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify({ claims, total: claims.length }, null, 2));
+      } else {
+        if (claims.length === 0) {
+          console.log(chalk.dim('\nNo active file claims\n'));
+        } else {
+          console.log(chalk.bold(`\nActive File Claims: ${claims.length}\n`));
+
+          for (const claim of claims) {
+            const modeColor = claim.claim_mode === 'EXCLUSIVE'
+              ? chalk.red
+              : claim.claim_mode === 'SHARED'
+              ? chalk.yellow
+              : chalk.blue;
+
+            console.log(`  ${modeColor('●')} ${claim.file_path}`);
+            console.log(chalk.dim(`    Mode: ${claim.claim_mode}`));
+            console.log(chalk.dim(`    Session: ${claim.session_id.substring(0, 8)}...`));
+            console.log(chalk.dim(`    Claimed: ${claim.claimed_at}`));
+            console.log(chalk.dim(`    Expires: ${claim.expires_at}`));
+            if (claim.metadata) {
+              console.log(chalk.dim(`    Metadata: ${JSON.stringify(claim.metadata)}`));
+            }
+            console.log('');
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to list claims: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * View conflict resolution history (v0.5)
+ */
+program
+  .command('conflicts')
+  .description('View conflict resolution history (v0.5)')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--file <path>', 'Filter by file path')
+  .option('--type <type>', 'Filter by conflict type')
+  .option('--resolved', 'Show only resolved conflicts')
+  .option('--limit <n>', 'Limit number of results', '20')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const coordinator = new Coordinator();
+    try {
+      const limit = parseInt(options.limit, 10) || 20;
+
+      let resolutions = coordinator['db'].getConflictResolutions({
+        repo_path: options.repo,
+        file_path: options.file,
+        conflict_type: options.type as any,
+        is_resolved: options.resolved ? true : undefined
+      });
+
+      // Apply limit
+      resolutions = resolutions.slice(0, limit);
+
+      if (options.json) {
+        console.log(JSON.stringify({ resolutions, total: resolutions.length }, null, 2));
+      } else {
+        if (resolutions.length === 0) {
+          console.log(chalk.dim('\nNo conflict resolutions found\n'));
+        } else {
+          console.log(chalk.bold(`\nConflict Resolution History: ${resolutions.length}\n`));
+
+          for (const res of resolutions) {
+            const statusIcon = res.resolved_at ? chalk.green('✓') : chalk.yellow('○');
+
+            console.log(`  ${statusIcon} ${res.file_path}`);
+            console.log(chalk.dim(`    Type: ${res.conflict_type}`));
+            console.log(chalk.dim(`    Strategy: ${res.resolution_strategy}`));
+            if (res.confidence_score !== undefined && res.confidence_score !== null) {
+              const confidencePercent = (res.confidence_score * 100).toFixed(1);
+              console.log(chalk.dim(`    Confidence: ${confidencePercent}%`));
+            }
+            console.log(chalk.dim(`    Detected: ${res.detected_at}`));
+            if (res.resolved_at) {
+              console.log(chalk.dim(`    Resolved: ${res.resolved_at}`));
+            }
+            if (res.auto_fix_suggestion_id) {
+              console.log(chalk.dim(`    Auto-fix: ${res.auto_fix_suggestion_id.substring(0, 8)}...`));
+            }
+            console.log('');
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get conflict resolutions: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * List auto-fix suggestions (v0.5)
+ */
+program
+  .command('suggestions')
+  .description('List auto-fix suggestions (v0.5)')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--file <path>', 'Filter by file path')
+  .option('--min-confidence <n>', 'Minimum confidence score (0-1)', '0.5')
+  .option('--applied', 'Show only applied suggestions')
+  .option('--limit <n>', 'Limit number of results', '20')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const coordinator = new Coordinator();
+    try {
+      const limit = parseInt(options.limit, 10) || 20;
+      const minConfidence = parseFloat(options.minConfidence) || 0.5;
+
+      let suggestions = coordinator['db'].getAutoFixSuggestions({
+        repo_path: options.repo,
+        file_path: options.file,
+        min_confidence: minConfidence,
+        is_applied: options.applied ? true : undefined
+      });
+
+      // Apply limit
+      suggestions = suggestions.slice(0, limit);
+
+      if (options.json) {
+        console.log(JSON.stringify({ suggestions, total: suggestions.length }, null, 2));
+      } else {
+        if (suggestions.length === 0) {
+          console.log(chalk.dim('\nNo auto-fix suggestions found\n'));
+        } else {
+          console.log(chalk.bold(`\nAuto-Fix Suggestions: ${suggestions.length}\n`));
+
+          for (const sug of suggestions) {
+            const statusIcon = sug.was_auto_applied ? chalk.green('✓') : chalk.blue('○');
+            const confidencePercent = (sug.confidence_score * 100).toFixed(1);
+
+            console.log(`  ${statusIcon} ${sug.file_path}`);
+            console.log(chalk.dim(`    Strategy: ${sug.strategy_used}`));
+            console.log(chalk.dim(`    Confidence: ${confidencePercent}%`));
+            console.log(chalk.dim(`    Type: ${sug.conflict_type}`));
+            console.log(chalk.dim(`    Generated: ${sug.generated_at}`));
+            if (sug.applied_at) {
+              console.log(chalk.dim(`    Applied: ${sug.applied_at}`));
+            }
+            console.log(chalk.dim(`    Explanation: ${sug.explanation}`));
+            console.log('');
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get auto-fix suggestions: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
     }
   });
 
