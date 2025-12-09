@@ -158,19 +158,59 @@ Based on the v1.0 requirements, focusing on:
 **Required Additions**:
 ```typescript
 // Add to file-sync.ts
-function validateFilePath(path: string): boolean {
-  // Prevent directory traversal
-  const normalized = path.normalize(path);
+import * as nodePath from 'path';
+
+function validateFilePath(filePath: string): boolean {
+  // Normalize path to resolve any '..' or '.' segments
+  const normalized = nodePath.normalize(filePath);
+
+  // Prevent directory traversal attempts
   if (normalized.includes('..') || normalized.startsWith('/')) {
     throw new SecurityError('Invalid file path: directory traversal detected');
   }
+
+  // Additional check: ensure normalized path doesn't escape working directory
+  if (nodePath.isAbsolute(normalized)) {
+    throw new SecurityError('Invalid file path: absolute paths not allowed');
+  }
+
   return true;
 }
 
 // Add to sandbox-manager.ts
 function sanitizePrompt(prompt: string): string {
-  // Escape shell metacharacters
-  return prompt.replace(/([;&|`$(){}[\]<>*?~!])/g, '\\$1');
+  // Reject prompts containing shell metacharacters instead of escaping
+  // This is safer than trying to escape them, which is error-prone
+  const dangerousChars = /[;&|`$(){}[\]<>*?~!\\]/;
+
+  if (dangerousChars.test(prompt)) {
+    throw new SecurityError(
+      'Invalid prompt: shell metacharacters not allowed. ' +
+      'Use only alphanumeric characters, spaces, hyphens, and underscores.'
+    );
+  }
+
+  // Also reject control characters (except newlines and tabs)
+  if (/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/.test(prompt)) {
+    throw new SecurityError('Invalid prompt: control characters not allowed');
+  }
+
+  return prompt;
+}
+
+// Alternative: Use a whitelist approach (stricter, recommended for high-security contexts)
+function sanitizePromptWhitelist(prompt: string): string {
+  // Only allow: letters, numbers, spaces, hyphens, underscores, periods, newlines
+  const whitelist = /^[a-zA-Z0-9\s\-_.:\n]+$/;
+
+  if (!whitelist.test(prompt)) {
+    throw new SecurityError(
+      'Invalid prompt: only alphanumeric characters, spaces, hyphens, ' +
+      'underscores, periods, colons, and newlines are allowed'
+    );
+  }
+
+  return prompt;
 }
 ```
 
