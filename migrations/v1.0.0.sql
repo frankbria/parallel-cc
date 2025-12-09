@@ -11,7 +11,7 @@
 -- Backward Compatibility:
 -- - All new columns are nullable or have defaults
 -- - Existing v0.5 sessions will work unchanged (execution_mode defaults to 'local')
--- - Migration is idempotent (can run multiple times safely)
+-- - Migration is protected by version checks (enforced by migration runner)
 --
 -- Architecture Requirements Implemented:
 -- - Enum validation with CHECK constraints
@@ -35,24 +35,63 @@ INSERT INTO schema_metadata (key, value) VALUES ('version', '1.0.0')
 ON CONFLICT(key) DO UPDATE SET value = '1.0.0', updated_at = datetime('now');
 
 -- ============================================================================
--- Alter Sessions Table for E2B Support
+-- Alter Sessions Table for E2B Support (Copy-Recreate Pattern)
 -- ============================================================================
 
--- Add execution_mode column (default: 'local' for backward compatibility)
-ALTER TABLE sessions ADD COLUMN execution_mode TEXT DEFAULT 'local' CHECK(execution_mode IN ('local', 'e2b'));
+-- IMPORTANT: Idempotency Strategy
+-- --------------------------------
+-- SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS, so this
+-- migration uses a copy-recreate pattern for adding columns.
+--
+-- Idempotency is enforced by the migration runner (src/db.ts:runMigration):
+--   1. Checks current schema_version before execution
+--   2. Skips migration if already at target version (1.0.0)
+--   3. Creates backup before migration
+--   4. Verifies schema_version after execution
+--
+-- WARNING: Do NOT execute this SQL file directly (e.g., via sqlite3 cli).
+--          Always use the migration runner: `parallel-cc migrate 1.0.0`
+--          Direct execution will fail on second run due to table recreation.
+--
+-- If you need truly standalone idempotency, use column-existence checks
+-- in the application layer before calling runMigration().
 
--- Add sandbox_id column (nullable, only populated for E2B sessions)
-ALTER TABLE sessions ADD COLUMN sandbox_id TEXT;
+-- Step 1: Create new table with E2B columns
+CREATE TABLE sessions_new (
+  id TEXT PRIMARY KEY,
+  pid INTEGER NOT NULL,
+  repo_path TEXT NOT NULL,
+  worktree_path TEXT NOT NULL,
+  worktree_name TEXT,
+  is_main_repo INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_heartbeat TEXT NOT NULL DEFAULT (datetime('now')),
+  -- New E2B columns (v1.0.0)
+  execution_mode TEXT DEFAULT 'local' CHECK(execution_mode IN ('local', 'e2b')),
+  sandbox_id TEXT,
+  prompt TEXT,
+  status TEXT CHECK(status IS NULL OR status IN ('INITIALIZING', 'RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT')),
+  output_log TEXT
+);
 
--- Add prompt column (nullable, stores user's task description for E2B sessions)
-ALTER TABLE sessions ADD COLUMN prompt TEXT;
+-- Step 2: Copy all existing data from old sessions table
+-- Set execution_mode='local' for all existing sessions (backward compatibility)
+INSERT INTO sessions_new (
+  id, pid, repo_path, worktree_path, worktree_name,
+  is_main_repo, created_at, last_heartbeat,
+  execution_mode, sandbox_id, prompt, status, output_log
+)
+SELECT
+  id, pid, repo_path, worktree_path, worktree_name,
+  is_main_repo, created_at, last_heartbeat,
+  'local', NULL, NULL, NULL, NULL
+FROM sessions;
 
--- Add status column (nullable, tracks E2B sandbox execution state)
--- Valid values: INITIALIZING, RUNNING, COMPLETED, FAILED, TIMEOUT
-ALTER TABLE sessions ADD COLUMN status TEXT CHECK(status IS NULL OR status IN ('INITIALIZING', 'RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT'));
+-- Step 3: Drop old table
+DROP TABLE sessions;
 
--- Add output_log column (nullable, stores execution logs for E2B sessions)
-ALTER TABLE sessions ADD COLUMN output_log TEXT;
+-- Step 4: Rename new table to original name
+ALTER TABLE sessions_new RENAME TO sessions;
 
 -- ============================================================================
 -- Create Indexes for E2B Queries
