@@ -27,6 +27,14 @@ import {
   type InstallHooksOptions
 } from './hooks-installer.js';
 import { startMcpServer } from './mcp/index.js';
+import { SandboxManager } from './e2b/sandbox-manager.js';
+import { createTarball, uploadToSandbox, downloadChangedFiles, scanForCredentials } from './e2b/file-sync.js';
+import { executeClaudeInSandbox } from './e2b/claude-runner.js';
+import { logger } from './logger.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
+import { SandboxStatus, type E2BSession, type StatusResult, type SessionInfo } from './types.js';
 
 program
   .name('parallel-cc')
@@ -163,16 +171,55 @@ program
   .command('status')
   .description('Show status of active sessions')
   .option('--repo <path>', 'Filter by repository')
+  .option('--sandbox-only', 'Show only E2B sandbox sessions (v1.0)')
   .option('--json', 'Output as JSON')
   .action((options) => {
     const coordinator = new Coordinator();
     try {
-      const result = coordinator.status(options.repo);
+      const db = coordinator['db'];
+
+      let result: StatusResult;
+      let sessions: SessionInfo[];
+
+      if (options.sandboxOnly) {
+        // Filter for E2B sessions only
+        const repoPath = options.repo ? path.resolve(options.repo) : undefined;
+        const e2bSessions = db.listE2BSessions(repoPath);
+
+        // Convert E2B sessions to SessionInfo format
+        sessions = e2bSessions.map(e2b => {
+          const createdAt = new Date(e2b.created_at);
+          const durationMs = Date.now() - createdAt.getTime();
+          const durationMinutes = Math.floor(durationMs / 1000 / 60);
+
+          return {
+            sessionId: e2b.id,
+            pid: e2b.pid,
+            worktreePath: e2b.worktree_path,
+            worktreeName: e2b.worktree_name,
+            isMainRepo: e2b.is_main_repo,
+            createdAt: e2b.created_at,
+            lastHeartbeat: e2b.last_heartbeat,
+            isAlive: coordinator['isProcessAlive'](e2b.pid),
+            durationMinutes
+          };
+        });
+
+        result = {
+          repoPath: repoPath || 'all',
+          totalSessions: sessions.length,
+          sessions
+        };
+      } else {
+        // Standard status (local sessions)
+        result = coordinator.status(options.repo);
+      }
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
       } else {
-        console.log(chalk.bold(`\nActive Sessions: ${result.totalSessions}`));
+        const sessionType = options.sandboxOnly ? 'E2B Sandbox Sessions' : 'Active Sessions';
+        console.log(chalk.bold(`\n${sessionType}: ${result.totalSessions}`));
 
         if (result.totalSessions === 0) {
           console.log(chalk.dim('  No active sessions'));
@@ -189,6 +236,15 @@ program
             console.log(chalk.dim(`    Path: ${session.worktreePath}`));
             console.log(chalk.dim(`    Duration: ${session.durationMinutes}m`));
             console.log(chalk.dim(`    Last heartbeat: ${session.lastHeartbeat}`));
+
+            // Show E2B-specific info if in sandbox-only mode
+            if (options.sandboxOnly) {
+              const e2bSession = db.listE2BSessions().find(s => s.id === session.sessionId);
+              if (e2bSession) {
+                console.log(chalk.dim(`    Sandbox: ${e2bSession.sandbox_id}`));
+                console.log(chalk.dim(`    Status: ${e2bSession.status}`));
+              }
+            }
           }
         }
         console.log('');
@@ -1088,6 +1144,695 @@ program
         console.log(JSON.stringify({ success: false, error: errorMessage }));
       } else {
         console.error(chalk.red(`✗ Failed to get auto-fix suggestions: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+// ============================================================================
+// E2B Sandbox Commands (v1.0)
+// ============================================================================
+
+/**
+ * Execute autonomous task in E2B sandbox
+ */
+program
+  .command('sandbox-run')
+  .description('Execute autonomous task in E2B sandbox with full worktree isolation (v1.0)')
+  .requiredOption('--repo <path>', 'Repository path')
+  .option('--prompt <text>', 'Prompt text to execute')
+  .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
+  .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
+  .option('--no-commit', 'Skip auto-commit of results to worktree')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    const sandboxManager = new SandboxManager(logger);
+
+    try {
+      // Validate inputs
+      if (!options.prompt && !options.promptFile) {
+        console.error(chalk.red('✗ Error: Either --prompt or --prompt-file is required'));
+        process.exit(1);
+      }
+
+      if (options.prompt && options.promptFile) {
+        console.error(chalk.red('✗ Error: Cannot use both --prompt and --prompt-file'));
+        process.exit(1);
+      }
+
+      // Read prompt
+      let prompt: string;
+      if (options.promptFile) {
+        try {
+          prompt = await fs.readFile(options.promptFile, 'utf-8');
+          if (!options.json) {
+            console.log(chalk.dim(`Reading prompt from: ${options.promptFile}`));
+          }
+        } catch (error) {
+          console.error(chalk.red(`✗ Failed to read prompt file: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          process.exit(1);
+        }
+      } else {
+        prompt = options.prompt;
+      }
+
+      // Normalize repo path
+      const repoPath = path.resolve(options.repo);
+
+      if (!options.json) {
+        console.log(chalk.bold('\n🚀 Starting E2B Sandbox Execution\n'));
+        console.log(chalk.dim(`Repository: ${repoPath}`));
+        console.log(chalk.dim(`Prompt length: ${prompt.length} characters`));
+        if (options.dryRun) {
+          console.log(chalk.yellow('Mode: DRY RUN (upload only, no execution)\n'));
+        }
+      }
+
+      // Step 1: Check for parallel sessions and create worktree if needed
+      if (!options.json) {
+        console.log(chalk.blue('Step 1/6: Setting up isolated worktree...'));
+      }
+
+      const sessionId = randomUUID();
+      const pid = process.pid;
+
+      const registerResult = await coordinator.register(repoPath, pid);
+      const worktreePath = registerResult.worktreePath;
+
+      if (!options.json) {
+        if (registerResult.isMainRepo) {
+          console.log(chalk.green('✓ Using main repository (no parallel sessions)'));
+        } else {
+          console.log(chalk.green(`✓ Created worktree: ${registerResult.worktreeName}`));
+          console.log(chalk.dim(`  Path: ${worktreePath}`));
+        }
+      }
+
+      // Step 2: Scan for credentials
+      if (!options.json) {
+        console.log(chalk.blue('\nStep 2/6: Scanning for credentials...'));
+      }
+
+      const credScan = await scanForCredentials(worktreePath);
+      if (credScan.hasSuspiciousFiles) {
+        if (!options.json) {
+          console.log(chalk.yellow(`⚠ Warning: Found ${credScan.suspiciousFiles.length} files with potential credentials:`));
+          for (const file of credScan.suspiciousFiles.slice(0, 5)) {
+            console.log(chalk.yellow(`    - ${file}`));
+          }
+          if (credScan.suspiciousFiles.length > 5) {
+            console.log(chalk.yellow(`    ... and ${credScan.suspiciousFiles.length - 5} more`));
+          }
+          console.log(chalk.dim(`  ${credScan.recommendation}`));
+        }
+      } else {
+        if (!options.json) {
+          console.log(chalk.green('✓ No suspicious files detected'));
+        }
+      }
+
+      // Step 3: Create tarball
+      if (!options.json) {
+        console.log(chalk.blue('\nStep 3/6: Creating workspace tarball...'));
+      }
+
+      const tarballResult = await createTarball(worktreePath);
+
+      if (!options.json) {
+        console.log(chalk.green(`✓ Tarball created: ${(tarballResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
+        console.log(chalk.dim(`  Files: ${tarballResult.fileCount}`));
+        console.log(chalk.dim(`  Duration: ${(tarballResult.duration / 1000).toFixed(1)}s`));
+      }
+
+      // Step 4: Create sandbox and upload
+      if (!options.json) {
+        console.log(chalk.blue('\nStep 4/6: Creating E2B sandbox...'));
+      }
+
+      const { sandbox, sandboxId, status } = await sandboxManager.createSandbox(sessionId);
+
+      if (!options.json) {
+        console.log(chalk.green(`✓ Sandbox created: ${sandboxId}`));
+        console.log(chalk.dim('  Uploading workspace...'));
+      }
+
+      const uploadResult = await uploadToSandbox(tarballResult.path, sandbox, '/workspace');
+
+      if (!uploadResult.success) {
+        console.error(chalk.red(`✗ Upload failed: ${uploadResult.error}`));
+        await sandboxManager.terminateSandbox(sandboxId);
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.green(`✓ Workspace uploaded: ${(uploadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
+        console.log(chalk.dim(`  Duration: ${(uploadResult.duration / 1000).toFixed(1)}s`));
+      }
+
+      // Clean up local tarball
+      await fs.unlink(tarballResult.path);
+
+      // Create E2B session in database
+      const db = coordinator['db'];
+      db.createE2BSession({
+        id: sessionId,
+        pid,
+        repo_path: repoPath,
+        worktree_path: worktreePath,
+        worktree_name: registerResult.worktreeName,
+        sandbox_id: sandboxId,
+        prompt,
+        status: SandboxStatus.RUNNING
+      });
+
+      // Step 5: Execute (unless dry-run)
+      if (options.dryRun) {
+        if (!options.json) {
+          console.log(chalk.yellow('\n✓ DRY RUN complete - skipping execution'));
+          console.log(chalk.dim('  Sandbox will remain active for inspection'));
+          console.log(chalk.dim(`  Use: parallel-cc sandbox-kill --session-id ${sessionId}`));
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: true,
+            sessionId,
+            sandboxId,
+            worktreePath,
+            dryRun: true
+          }, null, 2));
+        }
+
+        return;
+      }
+
+      if (!options.json) {
+        console.log(chalk.blue('\nStep 5/6: Executing Claude Code...'));
+        console.log(chalk.dim('  This may take up to 60 minutes'));
+        console.log(chalk.dim('  Output is streaming in real-time\n'));
+      }
+
+      const executionResult = await executeClaudeInSandbox(
+        sandbox,
+        sandboxManager,
+        prompt,
+        logger,
+        {
+          workingDir: '/workspace',
+          timeout: 60,
+          streamOutput: true,
+          captureFullLog: true,
+          onProgress: (chunk) => {
+            if (!options.json) {
+              process.stdout.write(chunk);
+            }
+          }
+        }
+      );
+
+      // Update session status
+      db.updateE2BSessionStatus(
+        sandboxId,
+        executionResult.success ? SandboxStatus.COMPLETED : SandboxStatus.FAILED,
+        executionResult.output
+      );
+
+      if (!executionResult.success) {
+        console.error(chalk.red(`\n✗ Execution failed: ${executionResult.error}`));
+        await sandboxManager.terminateSandbox(sandboxId);
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.green(`\n✓ Execution completed: ${(executionResult.executionTime / 1000 / 60).toFixed(1)} minutes`));
+      }
+
+      // Step 6: Download results
+      if (!options.json) {
+        console.log(chalk.blue('\nStep 6/6: Downloading results...'));
+      }
+
+      const downloadResult = await downloadChangedFiles(sandbox, '/workspace', worktreePath);
+
+      if (!downloadResult.success) {
+        console.error(chalk.red(`✗ Download failed: ${downloadResult.error}`));
+        await sandboxManager.terminateSandbox(sandboxId);
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.green(`✓ Results downloaded: ${downloadResult.filesDownloaded} files`));
+        console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
+      }
+
+      // Commit changes if requested
+      if (options.commit !== false) {
+        if (!options.json) {
+          console.log(chalk.blue('\nCommitting changes to worktree...'));
+        }
+
+        try {
+          const gtr = new GtrWrapper(repoPath);
+          const commitMsg = `E2B sandbox execution: ${sessionId}\n\nPrompt: ${prompt.substring(0, 500)}${prompt.length > 500 ? '...' : ''}\nSandbox: ${sandboxId}\nExecution time: ${(executionResult.executionTime / 1000 / 60).toFixed(1)} minutes`;
+
+          // Git add and commit
+          execSync('git add -A', { cwd: worktreePath, stdio: 'pipe' });
+          execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: worktreePath, stdio: 'pipe' });
+
+          if (!options.json) {
+            console.log(chalk.green('✓ Changes committed to worktree'));
+          }
+        } catch (error) {
+          if (!options.json) {
+            console.log(chalk.yellow('⚠ No changes to commit or commit failed'));
+          }
+        }
+      }
+
+      // Cleanup sandbox
+      await sandboxManager.terminateSandbox(sandboxId);
+      db.cleanupE2BSession(sandboxId, SandboxStatus.COMPLETED);
+
+      // Release session
+      await coordinator.release(pid);
+
+      if (!options.json) {
+        console.log(chalk.bold.green('\n✅ Sandbox execution complete!\n'));
+        console.log(chalk.dim(`Session ID: ${sessionId}`));
+        console.log(chalk.dim(`Worktree: ${worktreePath}`));
+      } else {
+        console.log(JSON.stringify({
+          success: true,
+          sessionId,
+          sandboxId,
+          worktreePath,
+          executionTime: executionResult.executionTime,
+          filesDownloaded: downloadResult.filesDownloaded,
+          exitCode: executionResult.exitCode
+        }, null, 2));
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`\n✗ Sandbox execution failed: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * View sandbox session logs
+ */
+program
+  .command('sandbox-logs')
+  .description('View E2B sandbox execution logs (v1.0)')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .option('--follow', 'Follow log output in real-time (like tail -f)')
+  .option('--lines <n>', 'Number of lines to show', '100')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    try {
+      const db = coordinator['db'];
+      const sessionId = options.sessionId;
+
+      // Get E2B session by ID
+      const sessions = db.listE2BSessions();
+      const session = sessions.find(s => s.id === sessionId);
+
+      if (!session) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
+        } else {
+          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
+        }
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.bold(`\nSandbox Logs: ${sessionId}\n`));
+        console.log(chalk.dim(`Sandbox ID: ${session.sandbox_id}`));
+        console.log(chalk.dim(`Status: ${session.status}`));
+        console.log(chalk.dim(`Created: ${session.created_at}\n`));
+      }
+
+      // Get output log from database
+      const outputLog = session.output_log || '';
+
+      if (options.follow && session.status === SandboxStatus.RUNNING) {
+        if (!options.json) {
+          console.log(chalk.yellow('⚠ Follow mode not yet implemented for live sessions'));
+          console.log(chalk.dim('Showing buffered output:\n'));
+        }
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: true,
+          sessionId,
+          sandboxId: session.sandbox_id,
+          status: session.status,
+          output: outputLog,
+          lineCount: outputLog.split('\n').length
+        }, null, 2));
+      } else {
+        // Show last N lines
+        const lines = outputLog.split('\n');
+        const limitLines = parseInt(options.lines, 10) || 100;
+        const displayLines = lines.slice(-limitLines);
+
+        console.log(displayLines.join('\n'));
+        console.log(chalk.dim(`\n(Showing last ${displayLines.length} of ${lines.length} lines)`));
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get logs: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * Download sandbox results
+ */
+program
+  .command('sandbox-download')
+  .description('Download results from E2B sandbox to local directory (v1.0)')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .requiredOption('--output <path>', 'Output directory for downloaded files')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    const sandboxManager = new SandboxManager(logger);
+
+    try {
+      const db = coordinator['db'];
+      const sessionId = options.sessionId;
+
+      // Get E2B session
+      const sessions = db.listE2BSessions();
+      const session = sessions.find(s => s.id === sessionId);
+
+      if (!session) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
+        } else {
+          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
+        }
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.bold(`\nDownloading Sandbox Results\n`));
+        console.log(chalk.dim(`Sandbox ID: ${session.sandbox_id}`));
+        console.log(chalk.dim(`Output directory: ${options.output}`));
+      }
+
+      // Check if sandbox is still running
+      const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id);
+      if (!healthCheck.isHealthy) {
+        console.error(chalk.red(`✗ Sandbox not accessible: ${healthCheck.error}`));
+        process.exit(1);
+      }
+
+      // Get sandbox instance (reconnect)
+      const sandbox = sandboxManager['activeSandboxes'].get(session.sandbox_id);
+      if (!sandbox) {
+        console.error(chalk.red('✗ Sandbox instance not found (may have been terminated)'));
+        process.exit(1);
+      }
+
+      // Create output directory
+      await fs.mkdir(options.output, { recursive: true });
+
+      // Download files
+      const downloadResult = await downloadChangedFiles(sandbox, '/workspace', options.output);
+
+      if (!downloadResult.success) {
+        console.error(chalk.red(`✗ Download failed: ${downloadResult.error}`));
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: true,
+          sessionId,
+          sandboxId: session.sandbox_id,
+          outputPath: options.output,
+          filesDownloaded: downloadResult.filesDownloaded,
+          sizeBytes: downloadResult.sizeBytes
+        }, null, 2));
+      } else {
+        console.log(chalk.green(`\n✓ Downloaded ${downloadResult.filesDownloaded} files`));
+        console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
+        console.log(chalk.dim(`  Duration: ${(downloadResult.duration / 1000).toFixed(1)}s`));
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Download failed: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * Terminate sandbox
+ */
+program
+  .command('sandbox-kill')
+  .description('Terminate E2B sandbox and cleanup resources (v1.0)')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .option('--force', 'Force termination even if sandbox is busy')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    const sandboxManager = new SandboxManager(logger);
+
+    try {
+      const db = coordinator['db'];
+      const sessionId = options.sessionId;
+
+      // Get E2B session
+      const sessions = db.listE2BSessions();
+      const session = sessions.find(s => s.id === sessionId);
+
+      if (!session) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
+        } else {
+          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
+        }
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.bold(`\nTerminating Sandbox: ${session.sandbox_id}\n`));
+        if (options.force) {
+          console.log(chalk.yellow('⚠ Force mode enabled'));
+        }
+      }
+
+      // Terminate sandbox
+      // Note: Force mode is not implemented in SandboxManager.terminateSandbox yet
+      const termResult = await sandboxManager.terminateSandbox(session.sandbox_id);
+
+      if (!termResult.success) {
+        console.error(chalk.red(`✗ Termination failed: ${termResult.error}`));
+        process.exit(1);
+      }
+
+      // Cleanup database record
+      db.cleanupE2BSession(session.sandbox_id, SandboxStatus.FAILED, true);
+
+      // Release session if still active
+      const localSession = db.getSessionByPid(session.pid);
+      if (localSession) {
+        await coordinator.release(session.pid);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: true,
+          sessionId,
+          sandboxId: session.sandbox_id,
+          terminated: termResult.success,
+          cleanedUp: termResult.cleanedUp
+        }, null, 2));
+      } else {
+        console.log(chalk.green('\n✓ Sandbox terminated successfully'));
+        console.log(chalk.dim(`  Session: ${sessionId}`));
+        console.log(chalk.dim(`  Sandbox: ${session.sandbox_id}`));
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Termination failed: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * List all E2B sandbox sessions
+ */
+program
+  .command('sandbox-list')
+  .description('List all E2B sandbox sessions (v1.0)')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const coordinator = new Coordinator();
+    try {
+      const db = coordinator['db'];
+      const repoPath = options.repo ? path.resolve(options.repo) : undefined;
+
+      const sessions = db.listE2BSessions(repoPath);
+
+      if (options.json) {
+        console.log(JSON.stringify({ sessions, total: sessions.length }, null, 2));
+      } else {
+        console.log(chalk.bold(`\nE2B Sandbox Sessions: ${sessions.length}\n`));
+
+        if (sessions.length === 0) {
+          console.log(chalk.dim('  No E2B sessions found'));
+        } else {
+          for (const session of sessions) {
+            const statusColor =
+              session.status === SandboxStatus.COMPLETED ? chalk.green :
+              session.status === SandboxStatus.FAILED ? chalk.red :
+              session.status === SandboxStatus.TIMEOUT ? chalk.yellow :
+              chalk.blue;
+
+            console.log(`  ${statusColor('●')} ${session.id.substring(0, 8)}...`);
+            console.log(chalk.dim(`    Status: ${session.status}`));
+            console.log(chalk.dim(`    Sandbox: ${session.sandbox_id}`));
+            console.log(chalk.dim(`    Worktree: ${session.worktree_path}`));
+            console.log(chalk.dim(`    Created: ${session.created_at}`));
+            console.log(chalk.dim(`    Prompt: ${session.prompt.substring(0, 80)}${session.prompt.length > 80 ? '...' : ''}`));
+            console.log('');
+          }
+        }
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to list sessions: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
+ * Check sandbox health status
+ */
+program
+  .command('sandbox-status')
+  .description('Check health status of E2B sandbox (v1.0)')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    const sandboxManager = new SandboxManager(logger);
+
+    try {
+      const db = coordinator['db'];
+      const sessionId = options.sessionId;
+
+      // Get E2B session
+      const sessions = db.listE2BSessions();
+      const session = sessions.find(s => s.id === sessionId);
+
+      if (!session) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
+        } else {
+          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
+        }
+        process.exit(1);
+      }
+
+      if (!options.json) {
+        console.log(chalk.bold(`\nSandbox Status: ${session.sandbox_id}\n`));
+      }
+
+      // Check sandbox health
+      const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id);
+
+      // Calculate elapsed time
+      const createdAt = new Date(session.created_at);
+      const elapsedMinutes = (Date.now() - createdAt.getTime()) / 1000 / 60;
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: true,
+          sessionId,
+          sandboxId: session.sandbox_id,
+          status: session.status,
+          health: {
+            isHealthy: healthCheck.isHealthy,
+            message: healthCheck.message,
+            error: healthCheck.error
+          },
+          createdAt: session.created_at,
+          elapsedMinutes: elapsedMinutes.toFixed(1),
+          prompt: session.prompt
+        }, null, 2));
+      } else {
+        const healthIcon = healthCheck.isHealthy ? chalk.green('✓') : chalk.red('✗');
+        console.log(`  ${healthIcon} Health: ${healthCheck.isHealthy ? 'Healthy' : 'Unhealthy'}`);
+        console.log(chalk.dim(`    Status: ${session.status}`));
+        console.log(chalk.dim(`    Sandbox ID: ${session.sandbox_id}`));
+        console.log(chalk.dim(`    Created: ${session.created_at}`));
+        console.log(chalk.dim(`    Elapsed: ${elapsedMinutes.toFixed(1)} minutes`));
+        console.log(chalk.dim(`    Worktree: ${session.worktree_path}`));
+
+        if (healthCheck.message) {
+          console.log(chalk.dim(`    Message: ${healthCheck.message}`));
+        }
+        if (healthCheck.error) {
+          console.log(chalk.red(`    Error: ${healthCheck.error}`));
+        }
+
+        console.log(chalk.dim(`\n  Prompt: ${session.prompt.substring(0, 200)}${session.prompt.length > 200 ? '...' : ''}`));
+        console.log('');
+      }
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get status: ${errorMessage}`));
       }
       process.exit(1);
     } finally {

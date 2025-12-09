@@ -2,6 +2,30 @@
  * Core type definitions for parallel-cc
  */
 
+// ============================================================================
+// E2B Sandbox Types (v1.0) - Defined early for use in Session interface
+// ============================================================================
+
+/**
+ * Execution mode for sessions
+ */
+export type ExecutionMode = 'local' | 'e2b';
+
+/**
+ * E2B sandbox status
+ */
+export enum SandboxStatus {
+  INITIALIZING = 'INITIALIZING',
+  RUNNING = 'RUNNING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  TIMEOUT = 'TIMEOUT'
+}
+
+// ============================================================================
+// Core Session Types
+// ============================================================================
+
 export interface Session {
   id: string;
   pid: number;
@@ -11,6 +35,12 @@ export interface Session {
   is_main_repo: boolean;
   created_at: string;
   last_heartbeat: string;
+  // v1.0: Optional E2B fields (for backward compatibility)
+  execution_mode?: ExecutionMode;
+  sandbox_id?: string | null;
+  prompt?: string | null;
+  status?: string | null;
+  output_log?: string | null;
 }
 
 export interface SessionRow {
@@ -22,6 +52,12 @@ export interface SessionRow {
   is_main_repo: number; // SQLite stores booleans as 0/1
   created_at: string;
   last_heartbeat: string;
+  // v1.0: Optional E2B fields (for backward compatibility)
+  execution_mode?: ExecutionMode;
+  sandbox_id?: string | null;
+  prompt?: string | null;
+  status?: string | null;
+  output_log?: string | null;
 }
 
 export interface RegisterResult {
@@ -428,4 +464,96 @@ export interface SuggestionFilters {
   conflict_type?: ConflictType;
   is_applied?: boolean;
   min_confidence?: number;
+}
+
+// Note: ExecutionMode and SandboxStatus are defined at the top of the file
+
+/**
+ * E2B session configuration
+ */
+export interface E2BSessionConfig {
+  claudeVersion?: string; // e.g., "1.0.0" or "latest"
+  e2bSdkVersion: string; // Pin E2B SDK version
+  sandboxImage: string; // e.g., "anthropic-claude-code:latest"
+  timeoutMinutes?: number; // Default: 60
+  warningThresholds?: number[]; // Default: [30, 50] minutes
+}
+
+/**
+ * E2B session extends base session with sandbox-specific fields
+ */
+export interface E2BSession extends Session {
+  execution_mode: 'e2b';
+  sandbox_id: string;
+  prompt: string;
+  status: SandboxStatus;
+  output_log?: string;
+}
+
+/**
+ * E2B session database row (SQLite representation)
+ */
+export interface E2BSessionRow extends SessionRow {
+  execution_mode: ExecutionMode;
+  sandbox_id: string | null;
+  prompt: string | null;
+  status: string | null;
+  output_log: string | null;
+}
+
+/**
+ * Sandbox health check result
+ */
+export interface SandboxHealthCheck {
+  isHealthy: boolean;
+  sandboxId: string;
+  status: SandboxStatus;
+  lastHeartbeat: Date;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Sandbox termination result
+ */
+export interface SandboxTerminationResult {
+  success: boolean;
+  sandboxId: string;
+  cleanedUp: boolean;
+  error?: string;
+}
+
+/**
+ * Sandbox timeout warning
+ */
+export interface TimeoutWarning {
+  sandboxId: string;
+  elapsedMinutes: number;
+  warningLevel: 'soft' | 'hard';
+  message: string;
+  estimatedCost?: string;
+}
+
+// ============================================================================
+// Type Guards (v1.0)
+// ============================================================================
+
+/**
+ * Type guard to check if a session is an E2B session
+ *
+ * @param session - Session to check
+ * @returns true if session is E2BSession
+ */
+export function isE2BSession(session: Session | E2BSession): session is E2BSession {
+  return 'execution_mode' in session && session.execution_mode === 'e2b';
+}
+
+/**
+ * Type guard to check if a session is a local session
+ *
+ * @param session - Session to check
+ * @returns true if session is a standard local Session
+ */
+export function isLocalSession(session: Session | E2BSession): session is Session {
+  return !('execution_mode' in session) || session.execution_mode === 'local';
 }

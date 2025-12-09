@@ -270,6 +270,72 @@ cd ~/projects/myrepo  # Go to main repo
 git merge <worktree-branch-name>
 ```
 
+## 🚀 E2B Sandbox Integration (v1.0)
+
+**NEW:** Run autonomous Claude Code sessions in isolated cloud sandboxes for truly hands-free development.
+
+### Quick Start
+
+```bash
+# Prerequisites: E2B account and API key
+export E2B_API_KEY="your-key-here"
+
+# Step 1: Plan interactively (local)
+cd ~/projects/myrepo
+claude  # Create PLAN.md with implementation steps
+git commit PLAN.md -m "plan: feature implementation"
+
+# Step 2: Execute autonomously (E2B sandbox)
+parallel-cc sandbox-run --repo . --prompt "Execute PLAN.md with TDD approach"
+# Walk away - Claude works unattended for 30+ minutes in isolated sandbox
+
+# Step 3: Review results
+cd parallel-e2b-abc123  # worktree with completed work
+git diff main
+pytest tests/  # verify locally
+git push origin HEAD:feature/my-feature
+```
+
+### Why E2B Sandboxes?
+
+- **Truly Autonomous**: Execute long-running tasks (up to 1 hour) without supervision
+- **Safe Execution**: Sandboxes run with `--dangerously-skip-permissions` safely in isolated VMs
+- **Plan-Driven**: Claude autonomously follows PLAN.md or custom prompts step-by-step
+- **Real-Time Monitoring**: Stream output and check progress anytime
+- **Cost-Effective**: ~$0.10/hour for E2B compute time
+- **Git Integration**: Results automatically committed in worktrees for easy review
+
+### E2B Commands
+
+```bash
+# Execute autonomous task in sandbox
+parallel-cc sandbox-run --repo . --prompt "Implement feature X with tests"
+parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+parallel-cc sandbox-run --repo . --prompt-file .apm/Implementation_Plan.md
+
+# Monitor active sandbox sessions
+parallel-cc status --sandbox-only
+parallel-cc sandbox-logs --session-id e2b-abc123
+
+# Download results without terminating
+parallel-cc sandbox-download --session-id e2b-abc123 --output ./results
+
+# Kill running sandbox
+parallel-cc sandbox-kill --session-id e2b-abc123
+
+# Test upload/download without execution
+parallel-cc sandbox-run --dry-run --repo .
+```
+
+### Setup Requirements
+
+1. **E2B Account**: Sign up at https://e2b.dev (free tier available)
+2. **API Key**: Set `E2B_API_KEY` environment variable
+3. **Cost Awareness**: E2B charges ~$0.10/hour for sandbox compute time
+4. **Anthropic API Key**: Claude Code in sandbox uses your existing `ANTHROPIC_API_KEY`
+
+See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and troubleshooting.
+
 ## 🗺️ Roadmap
 
 **Completed:**
@@ -279,15 +345,22 @@ git merge <worktree-branch-name>
 - [x] **v0.2.4** - Shell alias setup & full installation command
 - [x] **v0.3** - MCP server for status queries + >85% test coverage
 - [x] **v0.4** - Branch merge detection & rebase assistance
-- [x] **v0.5** - Advanced conflict resolution & auto-fix suggestions ← *Current*
+- [x] **v0.5** - Advanced conflict resolution & auto-fix suggestions
   - File claims system for coordinating file access
   - Conflict detection (semantic, structural, concurrent edits)
   - AST-based analysis with Babel parser
   - AI-generated auto-fix suggestions with confidence scores
   - MCP tools for conflict resolution workflows
+- [x] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 ← *Current*
+  - Isolated cloud sandbox execution with full permissions
+  - Plan-driven autonomous workflows (PLAN.md support)
+  - Real-time output monitoring and streaming
+  - Intelligent file sync with compression
+  - Timeout enforcement (1-hour max with warnings)
+  - Cost tracking and optimization
 
-**Planned:**
-- [ ] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 *Major milestone*
+**Future:**
+- [ ] **v1.1** - Enhanced E2B features (parallel sandboxes, pause/resume, private repo support)
 
 See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and future ideas.
 
