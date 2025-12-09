@@ -28,7 +28,7 @@ const DEFAULT_CONFIG: Required<E2BSessionConfig> = {
 
 // Security constants
 const MAX_PROMPT_LENGTH = 100000; // 100KB
-const SHELL_METACHARACTERS = /([;&|`$(){}[\]<>*?~!\\])/g;
+const SHELL_METACHARACTERS = /([;&|`$(){}[\]<>*?~!\\"])/g;
 const PATH_TRAVERSAL_PATTERN = /\.\./;
 const ABSOLUTE_PATH_PATTERN = /^\/[^/]/;
 
@@ -45,7 +45,11 @@ export function sanitizePrompt(prompt: string): string {
   }
 
   // Remove control characters (except newlines and tabs)
-  const cleaned = prompt.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
+  let cleaned = prompt.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
+
+  // Replace newlines with literal \n for shell safety
+  // This prevents multiline prompts from breaking shell commands like: echo "prompt"
+  cleaned = cleaned.replace(/\n/g, '\\n');
 
   // Escape shell metacharacters for safe execution
   return cleaned.replace(SHELL_METACHARACTERS, '\\$1');

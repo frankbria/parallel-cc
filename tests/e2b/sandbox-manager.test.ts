@@ -654,8 +654,29 @@ describe('SandboxManager', () => {
       const withControl = 'test\x00\x01\x02\nvalid\ttext';
       const sanitized = sanitizePrompt(withControl);
       expect(sanitized).not.toContain('\x00');
-      expect(sanitized).toContain('\n');
+      // Newlines are now escaped for shell safety
+      expect(sanitized).toContain('\\n');
       expect(sanitized).toContain('\t');
+    });
+
+    it('should escape newlines in multiline prompts for shell safety', () => {
+      const multiline = 'Line 1\nLine 2\nLine 3';
+      const sanitized = sanitizePrompt(multiline);
+
+      // Newlines should be escaped
+      expect(sanitized).toContain('\\n');
+      expect(sanitized).not.toMatch(/[^\\]\n/); // No unescaped newlines
+
+      // Verify shell command would not break
+      const command = `echo "${sanitized}"`;
+      expect(command).not.toContain('\nLine'); // No literal newlines in command
+    });
+
+    it('should escape double quotes for shell safety', () => {
+      const withQuotes = 'test "quoted text" here';
+      const sanitized = sanitizePrompt(withQuotes);
+      expect(sanitized).toContain('\\"');
+      expect(sanitized).not.toMatch(/[^\\]"/); // No unescaped quotes
     });
 
     it('should preserve unicode characters', () => {
