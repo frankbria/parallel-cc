@@ -5,7 +5,7 @@
 
 import { program } from 'commander';
 import chalk from 'chalk';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import * as readline from 'readline';
 import { Coordinator } from './coordinator.js';
 import { GtrWrapper } from './gtr.js';
@@ -1400,7 +1400,17 @@ program
 
           // Git add and commit
           execSync('git add -A', { cwd: worktreePath, stdio: 'pipe' });
-          execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: worktreePath, stdio: 'pipe' });
+
+          // Use spawnSync with argument array to prevent shell injection
+          // (safer than execSync with string interpolation)
+          const commitResult = spawnSync('git', ['commit', '-m', commitMsg], {
+            cwd: worktreePath,
+            stdio: 'pipe'
+          });
+
+          if (commitResult.status !== 0) {
+            throw new Error(`Git commit failed: ${commitResult.stderr?.toString() || 'Unknown error'}`);
+          }
 
           if (!options.json) {
             console.log(chalk.green('✓ Changes committed to worktree'));

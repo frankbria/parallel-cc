@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { SessionDB } from '../src/db.js';
@@ -37,7 +37,13 @@ function getDefaultBranch(dir: string): string {
 function createCommit(dir: string, filename: string, content: string, message: string): string {
   writeFileSync(join(dir, filename), content);
   execSync(`git add "${filename}"`, { cwd: dir, stdio: 'pipe' });
-  execSync(`git commit -m "${message}"`, { cwd: dir, stdio: 'pipe' });
+
+  // Use spawnSync to prevent shell injection in commit messages
+  const commitResult = spawnSync('git', ['commit', '-m', message], { cwd: dir, stdio: 'pipe' });
+  if (commitResult.status !== 0) {
+    throw new Error(`Git commit failed: ${commitResult.stderr?.toString() || 'Unknown error'}`);
+  }
+
   return execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8', stdio: 'pipe' }).trim();
 }
 
