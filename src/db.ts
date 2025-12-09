@@ -5,6 +5,7 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync, copyFileSync } from 'fs';
 import { dirname, join as pathJoin } from 'path';
+import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import type {
@@ -43,6 +44,14 @@ import {
   sanitizeMetadata
 } from './db-validators.js';
 import { logger } from './logger.js';
+
+/**
+ * Get the package root directory (parent of src/)
+ * Resolves migrations path relative to module location, not process.cwd()
+ */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PACKAGE_ROOT = dirname(__dirname); // Parent of src/
 
 /**
  * Safely parse JSON with error handling
@@ -1413,7 +1422,9 @@ export class SessionDB {
       copyFileSync(dbPath, backupPath);
 
       // Read migration SQL
-      const migrationPath = pathJoin(process.cwd(), 'migrations', `v${version}.sql`);
+      // Resolve migrations relative to package root, not process.cwd()
+      // This ensures migrations are found regardless of where the process is run
+      const migrationPath = pathJoin(PACKAGE_ROOT, 'migrations', `v${version}.sql`);
       if (!existsSync(migrationPath)) {
         throw new Error(`Migration file not found: ${migrationPath}`);
       }
