@@ -85,7 +85,7 @@ describe('Claude Runner Integration Tests', () => {
       expect(result).toBeDefined();
       expect(result.executionTime).toBeGreaterThan(0);
       expect(result.state).toBeDefined();
-    }, 60000); // 60 second timeout
+    }, 360000); // 6 minute timeout (execution timeout is 5 minutes)
   });
 
   describe('executeClaudeInSandbox', () => {
@@ -112,7 +112,7 @@ describe('Claude Runner Integration Tests', () => {
       expect(result.executionTime).toBeGreaterThan(0);
       expect(result.state).toBeDefined();
       expect(['completed', 'failed', 'timeout', 'killed']).toContain(result.state);
-    }, 120000); // 2 minute timeout
+    }, 660000); // 11 minute timeout (execution timeout is 10 minutes)
   });
 
   describe('Helper Functions', () => {
