@@ -301,6 +301,11 @@ async function uploadWithCheckpoints(
     const totalChunks = Math.ceil(stats.size / CHECKPOINT_SIZE_BYTES);
     let checkpoints = 0;
 
+    // Calculate zero-padding width based on total chunks
+    // If totalChunks = 1000, we need 4 digits (0000-0999)
+    const paddingWidth = totalChunks.toString().length;
+    logger.debug(`Uploading ${totalChunks} chunks with ${paddingWidth}-digit padding`);
+
     // Read file in chunks
     const fileHandle = await fs.open(tarballPath, 'r');
     const buffer = Buffer.allocUnsafe(CHECKPOINT_SIZE_BYTES);
@@ -314,8 +319,10 @@ async function uploadWithCheckpoints(
         const { bytesRead } = await fileHandle.read(buffer, 0, bytesToRead, offset);
         const chunk = buffer.subarray(0, bytesRead);
 
-        // Upload chunk (append mode)
-        const chunkPath = `${remotePath}/worktree.tar.gz.part${chunkIndex}`;
+        // Upload chunk with zero-padded index for correct lexicographic ordering
+        // This ensures part9 comes before part10 (e.g., part009 < part010)
+        const paddedIndex = chunkIndex.toString().padStart(paddingWidth, '0');
+        const chunkPath = `${remotePath}/worktree.tar.gz.part${paddedIndex}`;
         await Promise.race([
           sandbox.files.write(chunkPath, chunk),
           new Promise((_, reject) =>
@@ -327,7 +334,8 @@ async function uploadWithCheckpoints(
         logger.debug(`Checkpoint ${checkpoints}/${totalChunks}: ${formatBytes(offset + bytesRead)} / ${formatBytes(stats.size)}`);
       }
 
-      // Combine chunks in sandbox
+      // Combine chunks in sandbox using glob (now safe due to zero-padding)
+      // Zero-padding ensures lexicographic ordering matches numeric ordering
       const combineCommand = `cat ${remotePath}/worktree.tar.gz.part* > ${remotePath}/worktree.tar.gz && rm ${remotePath}/worktree.tar.gz.part*`;
       await sandbox.commands.run(combineCommand, { timeoutMs: 5 * 60 * 1000 }); // 5 minutes for combining chunks
 
