@@ -1655,7 +1655,6 @@ program
   .command('sandbox-kill')
   .description('Terminate E2B sandbox and cleanup resources (v1.0)')
   .requiredOption('--session-id <id>', 'Session ID')
-  .option('--force', 'Force termination even if sandbox is busy')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1680,13 +1679,9 @@ program
 
       if (!options.json) {
         console.log(chalk.bold(`\nTerminating Sandbox: ${session.sandbox_id}\n`));
-        if (options.force) {
-          console.log(chalk.yellow('⚠ Force mode enabled'));
-        }
       }
 
       // Terminate sandbox
-      // Note: Force mode is not implemented in SandboxManager.terminateSandbox yet
       const termResult = await sandboxManager.terminateSandbox(session.sandbox_id);
 
       if (!termResult.success) {
