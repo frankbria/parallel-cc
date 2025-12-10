@@ -1170,6 +1170,7 @@ program
   .action(async (options) => {
     const coordinator = new Coordinator();
     const sandboxManager = new SandboxManager(logger);
+    let sandboxId: string | null = null;
 
     try {
       // Validate inputs
@@ -1267,12 +1268,15 @@ program
         console.log(chalk.dim(`  Duration: ${(tarballResult.duration / 1000).toFixed(1)}s`));
       }
 
-      // Step 4: Create sandbox and upload
-      if (!options.json) {
-        console.log(chalk.blue('\nStep 4/6: Creating E2B sandbox...'));
-      }
+      // Wrap tarball usage in try/finally for guaranteed cleanup
+      try {
+        // Step 4: Create sandbox and upload
+        if (!options.json) {
+          console.log(chalk.blue('\nStep 4/6: Creating E2B sandbox...'));
+        }
 
-      const { sandbox, sandboxId, status } = await sandboxManager.createSandbox(sessionId);
+        const { sandbox, sandboxId: createdSandboxId, status } = await sandboxManager.createSandbox(sessionId);
+        sandboxId = createdSandboxId; // Track for cleanup in catch block
 
       if (!options.json) {
         console.log(chalk.green(`✓ Sandbox created: ${sandboxId}`));
@@ -1292,10 +1296,7 @@ program
         console.log(chalk.dim(`  Duration: ${(uploadResult.duration / 1000).toFixed(1)}s`));
       }
 
-      // Clean up local tarball
-      await fs.unlink(tarballResult.path);
-
-      // Create E2B session in database
+        // Create E2B session in database
       const db = coordinator['db'];
       db.createE2BSession({
         id: sessionId,
@@ -1395,7 +1396,6 @@ program
         }
 
         try {
-          const gtr = new GtrWrapper(repoPath);
           const commitMsg = `E2B sandbox execution: ${sessionId}\n\nPrompt: ${prompt.substring(0, 500)}${prompt.length > 500 ? '...' : ''}\nSandbox: ${sandboxId}\nExecution time: ${(executionResult.executionTime / 1000 / 60).toFixed(1)} minutes`;
 
           // Git add and commit
@@ -1445,8 +1445,31 @@ program
         }, null, 2));
       }
 
+      } finally {
+        // Best-effort cleanup of tarball
+        try {
+          const tarballExists = await fs.access(tarballResult.path).then(() => true).catch(() => false);
+          if (tarballExists) {
+            await fs.unlink(tarballResult.path);
+          }
+        } catch (cleanupError) {
+          // Log but don't throw - don't mask original errors
+          logger.warn(`Failed to cleanup tarball: ${cleanupError instanceof Error ? cleanupError.message : 'Unknown error'}`);
+        }
+      }
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      // Best-effort sandbox cleanup on error
+      if (sandboxId) {
+        try {
+          await sandboxManager.terminateSandbox(sandboxId);
+        } catch (cleanupError) {
+          // Log but don't throw - don't mask original error
+          logger.error(`Failed to cleanup sandbox during error handling: ${cleanupError instanceof Error ? cleanupError.message : 'Unknown error'}`);
+        }
+      }
       if (options.json) {
         console.log(JSON.stringify({ success: false, error: errorMessage }));
       } else {
