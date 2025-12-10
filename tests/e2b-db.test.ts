@@ -7,6 +7,7 @@ import { SessionDB } from '../src/db.js';
 import { SandboxStatus } from '../src/types.js';
 import { randomUUID } from 'crypto';
 import { existsSync, unlinkSync } from 'fs';
+import path from 'path';
 
 describe('E2B Database Operations', () => {
   let db: SessionDB;
@@ -24,7 +25,7 @@ describe('E2B Database Operations', () => {
 
     // Save current directory and switch to project root for migration
     const originalCwd = process.cwd();
-    const projectRoot = require('path').resolve(__dirname, '..');
+    const projectRoot = path.resolve(__dirname, '..');
     process.chdir(projectRoot);
 
     try {
