@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SessionDB } from '../src/db.js';
 import { SandboxStatus } from '../src/types.js';
 import { randomUUID } from 'crypto';
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, readdirSync } from 'fs';
 import path from 'path';
 
 describe('E2B Database Operations', () => {
@@ -40,14 +40,17 @@ describe('E2B Database Operations', () => {
     if (existsSync(testDbPath)) {
       unlinkSync(testDbPath);
     }
-    // Clean up backup files
-    const backup1 = `${testDbPath}.v0.5.0.backup`;
-    if (existsSync(backup1)) {
-      unlinkSync(backup1);
-    }
-    const backup2 = `${testDbPath}.vpre-migration.backup`;
-    if (existsSync(backup2)) {
-      unlinkSync(backup2);
+    // Clean up all backup files
+    try {
+      const files = readdirSync('.');
+      const backupPattern = /test-e2b\.db.*\.backup$/;
+      files.forEach((file: string) => {
+        if (backupPattern.test(file)) {
+          unlinkSync(file);
+        }
+      });
+    } catch (error) {
+      // Ignore errors during cleanup
     }
   });
 

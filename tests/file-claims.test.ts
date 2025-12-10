@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, readdirSync } from 'fs';
 import { SessionDB } from '../src/db.js';
 import { FileClaimsManager, ConflictError } from '../src/file-claims.js';
 import type { Session } from '../src/types.js';
@@ -66,6 +66,18 @@ describe('FileClaimsManager', () => {
     db.close();
     if (existsSync(testDbPath)) {
       unlinkSync(testDbPath);
+    }
+    // Clean up all backup files
+    try {
+      const files = readdirSync('.');
+      const backupPattern = /test-file-claims\.db.*\.backup$/;
+      files.forEach((file: string) => {
+        if (backupPattern.test(file)) {
+          unlinkSync(file);
+        }
+      });
+    } catch (error) {
+      // Ignore errors during cleanup
     }
   });
 

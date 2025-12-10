@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SessionDB } from '../src/db.js';
-import { existsSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, unlinkSync, writeFileSync, mkdirSync, rmSync, readdirSync } from 'fs';
 import { randomUUID } from 'crypto';
 import path from 'path';
 
@@ -31,14 +31,18 @@ describe('Database Migration Runner', () => {
     if (existsSync(testDbPath)) {
       unlinkSync(testDbPath);
     }
-    // Clean up all backup files
-    const backupPattern = new RegExp(`${testDbPath}\\.v.*\\.backup`);
-    const files = existsSync('.') ? require('fs').readdirSync('.') : [];
-    files.forEach((file: string) => {
-      if (backupPattern.test(file)) {
-        unlinkSync(file);
-      }
-    });
+    // Clean up all backup files (matches both .v*.backup and .vpre-migration.backup)
+    try {
+      const files = readdirSync('.');
+      const backupPattern = /test-migration\.db.*\.backup$/;
+      files.forEach((file: string) => {
+        if (backupPattern.test(file)) {
+          unlinkSync(file);
+        }
+      });
+    } catch (error) {
+      // Ignore errors during cleanup
+    }
     // Clean up test migrations
     if (existsSync(testMigrationsDir)) {
       rmSync(testMigrationsDir, { recursive: true });
