@@ -80,6 +80,65 @@ export const CHECKPOINT_SIZE_BYTES = 50 * 1024 * 1024;
 export const GZIP_LEVEL = 6;
 
 // ============================================================================
+// Path Validation (Security)
+// ============================================================================
+
+/**
+ * Validate remote path to prevent shell injection
+ *
+ * Only allows safe characters in remote paths:
+ * - Alphanumeric: A-Z, a-z, 0-9
+ * - Path separators: /
+ * - Common safe chars: _ (underscore), - (hyphen), . (dot)
+ *
+ * Rejects:
+ * - Shell metacharacters: ; & | ` $ ( ) { } [ ] < > * ? ~ ! \ " '
+ * - Control characters and whitespace
+ * - Relative paths (must start with /)
+ * - Directory traversal patterns (..)
+ *
+ * @param remotePath - Path to validate
+ * @throws Error if path contains unsafe characters
+ */
+export function validateRemotePath(remotePath: string): void {
+  if (!remotePath || typeof remotePath !== 'string') {
+    throw new Error('Remote path must be a non-empty string');
+  }
+
+  // Must be absolute path (starts with /)
+  if (!remotePath.startsWith('/')) {
+    throw new Error(`Remote path must be absolute (start with /): ${remotePath}`);
+  }
+
+  // Only allow safe characters: alphanumeric, /, _, -, .
+  const safePathPattern = /^[A-Za-z0-9/_.-]+$/;
+  if (!safePathPattern.test(remotePath)) {
+    throw new Error(
+      `Remote path contains unsafe characters. Only alphanumeric, /, _, -, and . are allowed: ${remotePath}`
+    );
+  }
+
+  // Reject directory traversal
+  if (remotePath.includes('..')) {
+    throw new Error(`Remote path contains directory traversal (..): ${remotePath}`);
+  }
+
+  // Reject paths with consecutive slashes (e.g., //) which can be confusing
+  if (remotePath.includes('//')) {
+    throw new Error(`Remote path contains consecutive slashes (//): ${remotePath}`);
+  }
+
+  // Reject hidden files/directories (starting with .) in path components
+  // Allow /path/to/.config but reject /.secret or /path/./file
+  const pathParts = remotePath.split('/').filter(p => p.length > 0);
+  for (const part of pathParts) {
+    if (part === '.' || part === '..') {
+      throw new Error(`Remote path contains invalid directory component: ${part}`);
+    }
+  }
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -231,6 +290,9 @@ export async function uploadToSandbox(
   const startTime = Date.now();
   logger.info(`Uploading tarball to E2B sandbox: ${remotePath}`);
 
+  // Validate remote path to prevent shell injection
+  validateRemotePath(remotePath);
+
   try {
     // Validate tarball exists
     const stats = await fs.stat(tarballPath);
@@ -295,6 +357,9 @@ async function uploadWithCheckpoints(
 ): Promise<UploadResult> {
   const startTime = Date.now();
   logger.info('Using resumable upload with checkpoints');
+
+  // Validate remote path to prevent shell injection
+  validateRemotePath(remotePath);
 
   try {
     const stats = await fs.stat(tarballPath);
@@ -385,6 +450,9 @@ export async function downloadChangedFiles(
 ): Promise<DownloadResult> {
   const startTime = Date.now();
   logger.info(`Downloading changed files from sandbox to: ${localPath}`);
+
+  // Validate remote path to prevent shell injection
+  validateRemotePath(remotePath);
 
   try {
     // Query git status in sandbox to find changed files
@@ -484,6 +552,9 @@ export async function verifyUpload(
   expectedSize: number
 ): Promise<VerificationResult> {
   logger.info('Verifying upload integrity...');
+
+  // Validate remote path to prevent shell injection
+  validateRemotePath(remotePath);
 
   try {
     // Count files in sandbox

