@@ -179,18 +179,27 @@ export class SandboxManager {
    * Monitor sandbox health with heartbeat checks
    *
    * @param sandboxId - Sandbox ID to check
+   * @param attemptReconnect - Whether to attempt reconnection if not in active sandboxes (default: true)
    * @returns Health check result
    */
-  async monitorSandboxHealth(sandboxId: string): Promise<SandboxHealthCheck> {
+  async monitorSandboxHealth(sandboxId: string, attemptReconnect: boolean = true): Promise<SandboxHealthCheck> {
     try {
-      const sandbox = this.activeSandboxes.get(sandboxId);
+      // Try to get existing sandbox or reconnect
+      let sandbox = this.activeSandboxes.get(sandboxId);
+
+      if (!sandbox && attemptReconnect) {
+        this.logger.info(`Sandbox ${sandboxId} not in active sandboxes, attempting reconnection...`);
+        const reconnected = await this.getOrReconnectSandbox(sandboxId);
+        sandbox = reconnected ?? undefined;
+      }
+
       if (!sandbox) {
         return {
           isHealthy: false,
           sandboxId,
           status: SandboxStatus.FAILED,
           lastHeartbeat: new Date(),
-          error: `Sandbox ${sandboxId} not found in active sandboxes`
+          error: `Sandbox ${sandboxId} not found and reconnection failed`
         };
       }
 
@@ -212,17 +221,17 @@ export class SandboxManager {
         isRunning = false;
       }
 
+      // Note: startTime may not exist for reconnected sandboxes
       const startTime = this.sandboxStartTimes.get(sandboxId);
-      if (!startTime) {
-        throw new Error(`Start time not found for sandbox ${sandboxId}`);
-      }
 
       return {
         isHealthy: isRunning,
         sandboxId,
         status: isRunning ? SandboxStatus.RUNNING : SandboxStatus.FAILED,
         lastHeartbeat: new Date(),
-        message: isRunning ? 'Sandbox is healthy' : 'Sandbox is not responding'
+        message: isRunning
+          ? (startTime ? 'Sandbox is healthy' : 'Sandbox is healthy (reconnected)')
+          : 'Sandbox is not responding'
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -381,6 +390,63 @@ export class SandboxManager {
    */
   getSandbox(sandboxId: string): Sandbox | null {
     return this.activeSandboxes.get(sandboxId) || null;
+  }
+
+  /**
+   * Get or reconnect to an existing sandbox
+   *
+   * This method first checks if the sandbox is already in the active sandboxes map.
+   * If not found, it attempts to reconnect to the sandbox using the E2B SDK's
+   * Sandbox.connect() method. This is essential for CLI commands that need to
+   * access sandboxes created in separate process invocations.
+   *
+   * @param sandboxId - Sandbox ID to connect to
+   * @param apiKey - Optional E2B API key (defaults to E2B_API_KEY env var)
+   * @returns Sandbox instance or null if connection fails
+   */
+  async getOrReconnectSandbox(sandboxId: string, apiKey?: string): Promise<Sandbox | null> {
+    try {
+      // Check if sandbox is already in active sandboxes
+      const existingSandbox = this.activeSandboxes.get(sandboxId);
+      if (existingSandbox) {
+        this.logger.debug(`Using cached sandbox instance: ${sandboxId}`);
+        return existingSandbox;
+      }
+
+      // Validate API key
+      const e2bApiKey = apiKey || process.env.E2B_API_KEY;
+      if (!e2bApiKey) {
+        this.logger.error('E2B API key not found. Set E2B_API_KEY environment variable.');
+        return null;
+      }
+
+      this.logger.info(`Reconnecting to sandbox: ${sandboxId}`);
+
+      // Reconnect to existing sandbox using E2B SDK
+      const sandbox = await Sandbox.connect(sandboxId, {
+        apiKey: e2bApiKey
+      });
+
+      // Track reconnected sandbox (but don't track start time since we don't know it)
+      this.activeSandboxes.set(sandboxId, sandbox);
+      this.logger.info(`Successfully reconnected to sandbox: ${sandboxId}`);
+
+      return sandbox;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to reconnect to sandbox ${sandboxId}: ${errorMsg}`);
+
+      // Provide helpful error messages
+      if (errorMsg.includes('not found') || errorMsg.includes('404')) {
+        this.logger.error('Sandbox may have been terminated or does not exist');
+      } else if (errorMsg.includes('API key')) {
+        this.logger.error('Invalid or missing E2B API key');
+      } else if (errorMsg.includes('timeout')) {
+        this.logger.error('Connection timeout - sandbox may be unresponsive');
+      }
+
+      return null;
+    }
   }
 
   /**

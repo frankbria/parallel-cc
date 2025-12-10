@@ -1595,17 +1595,17 @@ program
         console.log(chalk.dim(`Output directory: ${options.output}`));
       }
 
-      // Check if sandbox is still running
-      const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id);
+      // Check if sandbox is still running (will attempt reconnection)
+      const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id, true);
       if (!healthCheck.isHealthy) {
         console.error(chalk.red(`✗ Sandbox not accessible: ${healthCheck.error}`));
         process.exit(1);
       }
 
-      // Get sandbox instance (reconnect)
-      const sandbox = sandboxManager['activeSandboxes'].get(session.sandbox_id);
+      // Get sandbox instance (reconnect if needed)
+      const sandbox = await sandboxManager.getOrReconnectSandbox(session.sandbox_id);
       if (!sandbox) {
-        console.error(chalk.red('✗ Sandbox instance not found (may have been terminated)'));
+        console.error(chalk.red('✗ Failed to connect to sandbox (may have been terminated)'));
         process.exit(1);
       }
 
