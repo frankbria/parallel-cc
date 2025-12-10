@@ -454,6 +454,9 @@ export async function downloadChangedFiles(
   // Validate remote path to prevent shell injection
   validateRemotePath(remotePath);
 
+  // Validate local path to prevent shell injection and directory traversal
+  await validatePath(localPath);
+
   try {
     // Query git status in sandbox to find changed files
     const gitStatusCmd = await sandbox.commands.run('git status --porcelain', {
