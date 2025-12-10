@@ -345,6 +345,25 @@ program
     const dbPath = DEFAULT_CONFIG.dbPath.replace('~', process.env.HOME ?? '~');
     console.log(chalk.dim(`\n  Database: ${dbPath}`));
 
+    // Check database schema version
+    try {
+      const db = new SessionDB();
+      const schemaVersion = db.getSchemaVersion();
+      const hasE2B = db.hasE2BColumns();
+      db.close();
+
+      console.log(chalk.dim(`  Schema version: ${schemaVersion || 'none (pre-0.5.0)'}`));
+
+      if (!hasE2B) {
+        console.log(chalk.yellow('  ⚠ E2B sandbox features require v1.0.0 migration'));
+        console.log(chalk.dim('    Run: parallel-cc migrate --version 1.0.0'));
+      } else {
+        console.log(chalk.green('  ✓ E2B sandbox features available'));
+      }
+    } catch (error) {
+      console.log(chalk.dim(`  Schema version: unknown (error: ${error instanceof Error ? error.message : 'unknown'})`));
+    }
+
     // Show config
     console.log(chalk.dim(`  Stale threshold: ${DEFAULT_CONFIG.staleThresholdMinutes} minutes`));
     console.log(chalk.dim(`  Auto-cleanup: ${DEFAULT_CONFIG.autoCleanupWorktrees}`));
@@ -925,23 +944,69 @@ program
   });
 
 /**
- * Database migration to v0.5 (v0.5)
- * Migrate database schema to support file claims and conflict resolution
+ * Database migration (v0.5+)
+ * Migrate database schema to support various features
  */
 program
   .command('migrate')
-  .description('Run database migration to v0.5 schema (adds file_claims, conflict_resolutions, auto_fix_suggestions tables)')
+  .description('Run database migration to specified version (default: latest 1.0.0)')
+  .option('--version <version>', 'Target version (0.5.0 or 1.0.0)', '1.0.0')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
+    const targetVersion = options.version;
+
+    // Validate version parameter
+    const validVersions = ['0.5.0', '1.0.0'];
+    if (!validVersions.includes(targetVersion)) {
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: `Invalid version: ${targetVersion}. Valid versions: ${validVersions.join(', ')}` }));
+      } else {
+        console.error(chalk.red(`✗ Invalid version: ${targetVersion}`));
+        console.error(chalk.dim(`  Valid versions: ${validVersions.join(', ')}`));
+      }
+      process.exit(1);
+    }
+
     try {
-      await coordinator['db'].migrateToV05();
+      const db = coordinator['db'];
+      const currentVersion = db.getSchemaVersion();
 
       if (options.json) {
-        console.log(JSON.stringify({ success: true, message: 'Migration to v0.5 completed' }));
+        // JSON mode: silent until result
       } else {
-        console.log(chalk.green('✓ Migration to v0.5 completed successfully'));
-        console.log(chalk.dim('  Added tables: file_claims, conflict_resolutions, auto_fix_suggestions'));
+        console.log(chalk.dim(`Current schema version: ${currentVersion || 'none'}`));
+        console.log(chalk.dim(`Target version: ${targetVersion}`));
+      }
+
+      // Determine which migrations to run
+      if (targetVersion === '0.5.0') {
+        await db.migrateToV05();
+        if (options.json) {
+          console.log(JSON.stringify({ success: true, message: 'Migration to v0.5.0 completed', version: '0.5.0' }));
+        } else {
+          console.log(chalk.green('✓ Migration to v0.5.0 completed successfully'));
+          console.log(chalk.dim('  Added tables: file_claims, conflict_resolutions, auto_fix_suggestions'));
+        }
+      } else if (targetVersion === '1.0.0') {
+        // Need to run v0.5.0 first if not already there
+        if (!currentVersion || currentVersion < '0.5.0') {
+          if (!options.json) {
+            console.log(chalk.dim('Running v0.5.0 migration first...'));
+          }
+          await db.migrateToV05();
+        }
+
+        // Now run v1.0.0 migration
+        await db.runMigration('1.0.0');
+
+        if (options.json) {
+          console.log(JSON.stringify({ success: true, message: 'Migration to v1.0.0 completed', version: '1.0.0' }));
+        } else {
+          console.log(chalk.green('✓ Migration to v1.0.0 completed successfully'));
+          console.log(chalk.dim('  Added E2B sandbox columns: execution_mode, sandbox_id, prompt, status, output_log'));
+          console.log(chalk.dim('  E2B sandbox features are now available'));
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1173,6 +1238,25 @@ program
     let sandboxId: string | null = null;
 
     try {
+      // Check schema version - E2B features require v1.0.0 migration
+      const db = coordinator['db'];
+      const currentVersion = db.getSchemaVersion();
+      if (!db.hasE2BColumns()) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: 'E2B sandbox features require database migration to v1.0.0',
+            currentVersion: currentVersion || 'none',
+            requiredVersion: '1.0.0'
+          }));
+        } else {
+          console.error(chalk.red('✗ E2B sandbox features require database migration to v1.0.0'));
+          console.error(chalk.dim(`  Current version: ${currentVersion || 'none'}`));
+          console.error(chalk.yellow('  Run: parallel-cc migrate --version 1.0.0'));
+        }
+        process.exit(1);
+      }
+
       // Validate inputs
       if (!options.prompt && !options.promptFile) {
         console.error(chalk.red('✗ Error: Either --prompt or --prompt-file is required'));
