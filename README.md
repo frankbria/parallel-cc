@@ -1,13 +1,15 @@
 # parallel-cc
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> Coordinate parallel Claude Code sessions using git worktrees.
+> Coordinate parallel Claude Code sessions using git worktrees + E2B cloud sandboxes for autonomous execution.
 
-**parallel-cc** eliminates the chaos of running multiple Claude Code instances in the same repository by automatically creating isolated git worktrees for each session.
+**parallel-cc** enables both interactive and autonomous Claude Code workflows:
+- **Local mode**: Parallel worktree coordination for interactive development
+- **E2B Sandbox mode**: Long-running autonomous execution in isolated cloud VMs (v1.0)
 
 ## 📑 Table of Contents
 
@@ -29,6 +31,7 @@
 
 ## ✨ Features
 
+### Local Parallel Sessions
 - 🔄 **Automatic worktree creation** - No manual setup required
 - 🗄️ **SQLite-based coordination** - Fast, reliable session tracking
 - 🧹 **Auto-cleanup** - Worktrees removed when sessions end
@@ -41,6 +44,15 @@
 - 🧠 **Conflict resolution** - Track and resolve semantic, structural, and concurrent edit conflicts (v0.5)
 - ⚡ **Auto-fix suggestions** - AI-generated conflict resolutions with confidence scores (v0.5)
 - 🔍 **AST analysis** - Deep semantic conflict detection using abstract syntax trees (v0.5)
+
+### E2B Sandbox Execution (v1.0)
+- ☁️ **Cloud sandboxes** - Execute Claude Code in isolated E2B VMs
+- ⏱️ **Long-running tasks** - Up to 1 hour of uninterrupted execution
+- 🔐 **Security hardened** - Shell injection prevention, input validation, resource cleanup
+- 📦 **Intelligent file sync** - Compressed upload/download with selective sync
+- 🔄 **Cross-process reconnection** - Access sandboxes created in separate CLI invocations
+- 🎮 **Full CLI control** - Run, monitor, download, and kill sandbox sessions
+- 💰 **Cost tracking** - Automatic warnings at 30min and 50min usage marks
 
 ## The Problem
 

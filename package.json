@@ -1,7 +1,7 @@
 {
   "name": "parallel-cc",
-  "version": "0.5.0",
-  "description": "Coordinate parallel Claude Code sessions using git worktrees",
+  "version": "1.0.0",
+  "description": "Coordinate parallel Claude Code sessions using git worktrees and E2B cloud sandboxes for autonomous execution",
   "type": "module",
   "bin": {
     "parallel-cc": "./dist/cli.js"
