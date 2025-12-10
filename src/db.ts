@@ -5,6 +5,7 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync, copyFileSync } from 'fs';
 import { dirname, join as pathJoin } from 'path';
+import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import type {
@@ -26,8 +27,12 @@ import type {
   CreateConflictResolutionParams,
   ConflictFilters,
   CreateAutoFixSuggestionParams,
-  SuggestionFilters
+  SuggestionFilters,
+  E2BSession,
+  E2BSessionRow,
+  ExecutionMode
 } from './types.js';
+import { SandboxStatus } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
 import {
   validateFilePath,
@@ -39,6 +44,14 @@ import {
   sanitizeMetadata
 } from './db-validators.js';
 import { logger } from './logger.js';
+
+/**
+ * Get the package root directory (parent of src/)
+ * Resolves migrations path relative to module location, not process.cwd()
+ */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PACKAGE_ROOT = dirname(__dirname); // Parent of src/
 
 /**
  * Safely parse JSON with error handling
@@ -255,7 +268,12 @@ export class SessionDB {
   private rowToSession(row: SessionRow): Session {
     return {
       ...row,
-      is_main_repo: row.is_main_repo === 1
+      is_main_repo: row.is_main_repo === 1,
+      // Convert null to undefined for optional E2B fields
+      sandbox_id: row.sandbox_id || undefined,
+      prompt: row.prompt || undefined,
+      status: row.status || undefined,
+      output_log: row.output_log || undefined
     };
   }
 
@@ -1194,6 +1212,283 @@ export class SessionDB {
       deleted_at: row.deleted_at || undefined,
       deleted_reason: row.deleted_reason || undefined
     };
+  }
+
+  // ============================================================================
+  // E2B Session Operations (v1.0)
+  // ============================================================================
+
+  /**
+   * Create an E2B sandbox session
+   *
+   * @param params - E2B session parameters
+   * @returns The created E2B session
+   */
+  createE2BSession(params: {
+    id: string;
+    pid: number;
+    repo_path: string;
+    worktree_path: string;
+    worktree_name: string | null;
+    sandbox_id: string;
+    prompt: string;
+    status?: SandboxStatus;
+  }): E2BSession {
+    const stmt = this.db.prepare(`
+      INSERT INTO sessions (
+        id, pid, repo_path, worktree_path, worktree_name, is_main_repo,
+        execution_mode, sandbox_id, prompt, status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *
+    `);
+
+    const row = stmt.get(
+      params.id,
+      params.pid,
+      params.repo_path,
+      params.worktree_path,
+      params.worktree_name,
+      0, // E2B sessions are never main repo
+      'e2b',
+      params.sandbox_id,
+      params.prompt,
+      params.status || SandboxStatus.INITIALIZING
+    ) as E2BSessionRow;
+
+    logger.info(`Created E2B session ${params.id} with sandbox ${params.sandbox_id}`);
+    return this.rowToE2BSession(row);
+  }
+
+  /**
+   * Update E2B session status and optional output log
+   *
+   * @param sandboxId - Sandbox ID
+   * @param status - New status
+   * @param outputLog - Optional output log to append/update
+   * @returns true if session was updated
+   */
+  updateE2BSessionStatus(sandboxId: string, status: SandboxStatus, outputLog?: string): boolean {
+    const fields: string[] = ['status = ?', 'last_heartbeat = datetime(\'now\')'];
+    const params: unknown[] = [status];
+
+    if (outputLog !== undefined) {
+      fields.push('output_log = ?');
+      params.push(outputLog);
+    }
+
+    params.push(sandboxId);
+
+    const stmt = this.db.prepare(`
+      UPDATE sessions
+      SET ${fields.join(', ')}
+      WHERE sandbox_id = ? AND execution_mode = 'e2b'
+    `);
+
+    const result = stmt.run(...params);
+    const updated = result.changes > 0;
+
+    if (updated) {
+      logger.info(`Updated E2B session status: ${sandboxId} -> ${status}`);
+    }
+
+    return updated;
+  }
+
+  /**
+   * Get E2B session by sandbox ID
+   *
+   * @param sandboxId - Sandbox ID
+   * @returns E2B session or null if not found
+   */
+  getE2BSessionBySandboxId(sandboxId: string): E2BSession | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sessions
+      WHERE sandbox_id = ? AND execution_mode = 'e2b'
+    `);
+    const row = stmt.get(sandboxId) as E2BSessionRow | undefined;
+    return row ? this.rowToE2BSession(row) : null;
+  }
+
+  /**
+   * List all E2B sessions, optionally filtered by repo path
+   *
+   * @param repoPath - Optional repo path filter
+   * @returns Array of E2B sessions
+   */
+  listE2BSessions(repoPath?: string): E2BSession[] {
+    let query = `SELECT * FROM sessions WHERE execution_mode = 'e2b'`;
+    const params: unknown[] = [];
+
+    if (repoPath) {
+      query += ' AND repo_path = ?';
+      params.push(repoPath);
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const stmt = this.db.prepare(query);
+    const rows = stmt.all(...params) as E2BSessionRow[];
+    return rows.map(row => this.rowToE2BSession(row));
+  }
+
+  /**
+   * Clean up E2B session (mark as completed/failed and optionally delete)
+   *
+   * @param sandboxId - Sandbox ID
+   * @param finalStatus - Final status (COMPLETED, FAILED, or TIMEOUT)
+   * @param deleteSession - Whether to delete the session from database
+   * @returns true if session was cleaned up
+   */
+  cleanupE2BSession(
+    sandboxId: string,
+    finalStatus: SandboxStatus.COMPLETED | SandboxStatus.FAILED | SandboxStatus.TIMEOUT,
+    deleteSession = false
+  ): boolean {
+    if (deleteSession) {
+      const session = this.getE2BSessionBySandboxId(sandboxId);
+      if (session) {
+        const deleted = this.deleteSession(session.id);
+        if (deleted) {
+          logger.info(`Deleted E2B session for sandbox ${sandboxId}`);
+        }
+        return deleted;
+      }
+      return false;
+    } else {
+      const updated = this.updateE2BSessionStatus(sandboxId, finalStatus);
+      if (updated) {
+        logger.info(`Cleaned up E2B session for sandbox ${sandboxId} with status ${finalStatus}`);
+      }
+      return updated;
+    }
+  }
+
+  /**
+   * Convert E2B session row to E2BSession model
+   */
+  private rowToE2BSession(row: E2BSessionRow): E2BSession {
+    if (!row.sandbox_id || !row.prompt) {
+      throw new Error(`Invalid E2B session row: missing required fields (sandbox_id: ${row.sandbox_id}, prompt: ${row.prompt})`);
+    }
+
+    return {
+      id: row.id,
+      pid: row.pid,
+      repo_path: row.repo_path,
+      worktree_path: row.worktree_path,
+      worktree_name: row.worktree_name,
+      is_main_repo: row.is_main_repo === 1,
+      created_at: row.created_at,
+      last_heartbeat: row.last_heartbeat,
+      execution_mode: 'e2b',
+      sandbox_id: row.sandbox_id,
+      prompt: row.prompt,
+      status: (row.status as SandboxStatus) || SandboxStatus.INITIALIZING,
+      output_log: row.output_log || undefined
+    };
+  }
+
+  // ============================================================================
+  // Migration Runner (v1.0)
+  // ============================================================================
+
+  /**
+   * Run a database migration with automatic backup
+   *
+   * @param version - Migration version (e.g., "1.0.0")
+   * @throws Error if migration fails or file not found
+   */
+  async runMigration(version: string): Promise<void> {
+    try {
+      logger.info(`Starting migration to v${version}`);
+
+      // Check current version
+      const currentVersion = this.getSchemaVersion();
+      logger.info(`Current schema version: ${currentVersion || 'none'}`);
+
+      if (currentVersion === version) {
+        logger.info(`Already at v${version}, skipping migration`);
+        return;
+      }
+
+      // Create backup
+      const dbPath = this.db.name;
+      if (!existsSync(dbPath)) {
+        throw new Error(`Database file not found: ${dbPath}`);
+      }
+      const backupPath = `${dbPath}.v${currentVersion || 'pre-migration'}.backup`;
+      logger.info(`Creating backup at: ${backupPath}`);
+      copyFileSync(dbPath, backupPath);
+
+      // Read migration SQL
+      // Resolve migrations relative to package root, not process.cwd()
+      // This ensures migrations are found regardless of where the process is run
+      const migrationPath = pathJoin(PACKAGE_ROOT, 'migrations', `v${version}.sql`);
+      if (!existsSync(migrationPath)) {
+        throw new Error(`Migration file not found: ${migrationPath}`);
+      }
+
+      const migrationSQL = readFileSync(migrationPath, 'utf-8');
+      logger.info('Executing migration SQL');
+
+      // Run migration (already wrapped in transaction in SQL file)
+      this.db.exec(migrationSQL);
+
+      // Verify schema version was updated
+      const newVersion = this.getSchemaVersion();
+      if (newVersion !== version) {
+        throw new Error(`Migration verification failed: expected version ${version}, got ${newVersion}`);
+      }
+
+      logger.info(`Migration to v${version} completed successfully`);
+    } catch (error) {
+      logger.error('Migration failed', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Rollback a migration by restoring from backup
+   *
+   * @param version - Version to rollback to (e.g., "0.5.0")
+   * @throws Error if backup not found or restore fails
+   */
+  async rollbackMigration(version: string): Promise<void> {
+    try {
+      logger.warn(`Rolling back to v${version}`);
+
+      const dbPath = this.db.name;
+      const backupPath = `${dbPath}.v${version}.backup`;
+
+      if (!existsSync(backupPath)) {
+        throw new Error(`Backup file not found: ${backupPath}`);
+      }
+
+      // Close current database connection
+      this.db.close();
+
+      // Restore from backup
+      logger.info(`Restoring database from: ${backupPath}`);
+      copyFileSync(backupPath, dbPath);
+
+      // Reconnect to database
+      this.db = new Database(dbPath);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('busy_timeout = 5000');
+
+      // Note: We don't call init() here because the restored database
+      // already has all tables from the backup. init() would try to create
+      // tables that already exist, which is safe due to IF NOT EXISTS,
+      // but unnecessary.
+
+      // Verify version
+      const restoredVersion = this.getSchemaVersion();
+      logger.info(`Rollback complete. Database restored to v${restoredVersion}`);
+    } catch (error) {
+      logger.error('Rollback failed', error);
+      throw error;
+    }
   }
 
   close(): void {

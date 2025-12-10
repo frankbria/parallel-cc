@@ -4,7 +4,7 @@
 
 `parallel-cc` is a coordinator for running multiple Claude Code sessions in parallel on the same repository. It uses git worktrees to isolate each session's work.
 
-**Current Version:** 0.5.0
+**Current Version:** 1.0.0
 
 ## Architecture
 
@@ -155,6 +155,9 @@ vitest.config.ts  # Test framework configuration (project root)
 9. **File Claims** - Coordinate EXCLUSIVE/SHARED/INTENT file access across parallel sessions (v0.5)
 10. **Conflict Detection** - AST-based semantic analysis for TRIVIAL/CONCURRENT/STRUCTURAL/SEMANTIC conflicts (v0.5)
 11. **Auto-Fix Suggestions** - AI-powered conflict resolution with confidence scoring (v0.5)
+12. **E2B Sandbox Execution** - Autonomous Claude Code execution in isolated cloud VMs (v1.0)
+13. **Plan-Driven Workflows** - Execute implementation plans (PLAN.md) autonomously in sandboxes (v1.0)
+14. **File Sync** - Intelligent upload/download with compression and selective sync (v1.0)
 
 ## Development Commands
 
@@ -364,8 +367,126 @@ Get history of detected merge events for a repository.
 | v0.2.4 | ✅ Complete | Shell alias setup, full install command |
 | v0.3 | ✅ Complete | MCP server, >85% test coverage |
 | v0.4 | ✅ Complete | Branch merge detection, rebase assistance, conflict checking |
-| v0.5 | ✅ Current | File claims, AST conflict detection, AI auto-fix, 441 tests (100%) |
-| v1.0 | Planned | E2B sandbox integration for autonomous execution |
+| v0.5 | ✅ Complete | File claims, AST conflict detection, AI auto-fix, 441 tests (100%) |
+| v1.0 | ✅ Current | E2B sandbox integration for autonomous execution |
+
+## E2B Sandbox Integration (v1.0)
+
+### Overview
+
+E2B integration enables autonomous Claude Code execution in isolated cloud sandboxes. This transforms parallel-cc from a worktree coordinator into a complete autonomous development platform.
+
+### Usage Patterns
+
+**When to Use E2B Sandboxes:**
+- Long-running tasks (30+ minutes) that require uninterrupted execution
+- Complex implementations following detailed plans (PLAN.md)
+- Test-driven development workflows (write tests, implement, verify)
+- Large-scale refactoring with automated testing
+- Tasks where you want to "walk away" and review results later
+
+**When to Use Local Execution:**
+- Interactive development requiring frequent user input
+- Quick iterations and experimentation
+- Tasks requiring access to local services (databases, APIs)
+- Short tasks (<10 minutes) where overhead isn't worth it
+- Debugging and troubleshooting
+
+### Safety Guardrails
+
+**Automatic Protections:**
+1. **Worktree Isolation** - E2B sessions always run in dedicated worktrees, never main branch
+2. **Timeout Enforcement** - Hard limit at 1 hour (configurable down to 10 minutes)
+3. **Warning System** - Alerts at 30-minute and 50-minute marks
+4. **Credential Scanning** - Automatic detection and exclusion of sensitive files
+5. **Manual Review Required** - All changes must be reviewed before merging
+
+**Timeout Settings:**
+- Default: 60 minutes (E2B free tier limit)
+- Minimum: 10 minutes
+- Warnings: 30 minutes (50%), 50 minutes (83%)
+- Hard termination: At timeout limit, no grace period
+
+**Security Notes:**
+- Sandboxes run with `--dangerously-skip-permissions` flag (safe because sandboxed)
+- No access to local machine or network
+- Credentials automatically excluded via .gitignore and .e2bignore
+- Review all changes in worktree before merging to main
+
+### E2B vs Local Execution Decision Matrix
+
+| Scenario | Mode | Reason |
+|----------|------|--------|
+| "Implement auth system following PLAN.md" | E2B | Long-running, plan-driven, autonomous |
+| "Add a console.log statement" | Local | Quick, interactive |
+| "Refactor codebase with comprehensive tests" | E2B | Long-running, verification required |
+| "Debug failing test" | Local | Interactive, requires local environment |
+| "Generate API documentation" | E2B | Time-consuming, deterministic |
+| "Explore architectural options" | Local | Interactive, requires discussion |
+| "Run full test suite and fix failures" | E2B | Autonomous, verification-driven |
+| "Quick prototype of UI component" | Local | Interactive, visual feedback needed |
+
+### CLI Commands (E2B-Specific)
+
+```bash
+# Execute autonomous task
+parallel-cc sandbox-run --repo . --prompt "Implement feature X"
+parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+
+# Monitor active sandboxes
+parallel-cc status --sandbox-only
+parallel-cc sandbox-logs --session-id <id> --follow
+
+# Download results without terminating
+parallel-cc sandbox-download --session-id <id>
+
+# Kill running sandbox
+parallel-cc sandbox-kill --session-id <id>
+
+# Test setup without execution
+parallel-cc sandbox-run --dry-run --repo .
+```
+
+### Cost Expectations
+
+**E2B Pricing:**
+- Base rate: $0.10 per hour per sandbox
+- Billed per-second (minimum 1 minute)
+- Free tier: $10 credit for new accounts
+
+**Typical Costs:**
+- 10-minute task: ~$0.017
+- 30-minute task: ~$0.050
+- 60-minute task: ~$0.100
+- Monthly (20 tasks @ 30min): ~$1.00
+
+**Cost Optimization:**
+- Use appropriate timeouts (don't default to 60min for quick tasks)
+- Test with `--dry-run` before executing
+- Monitor active sandboxes and kill idle ones
+- Use local development for planning and design
+- Reserve E2B for complex, time-consuming implementations
+
+### Database Schema (E2B Extensions)
+
+```sql
+-- v1.0: E2B session tracking
+ALTER TABLE sessions ADD COLUMN execution_mode TEXT DEFAULT 'local';
+ALTER TABLE sessions ADD COLUMN sandbox_id TEXT;
+ALTER TABLE sessions ADD COLUMN prompt TEXT;
+ALTER TABLE sessions ADD COLUMN status TEXT DEFAULT 'active';
+ALTER TABLE sessions ADD COLUMN output_log TEXT;
+```
+
+### File Structure (E2B Modules)
+
+```
+src/e2b/
+├── sandbox-manager.ts    # E2B sandbox lifecycle management
+├── file-sync.ts          # Upload/download with compression
+├── claude-runner.ts      # Autonomous Claude execution
+└── output-monitor.ts     # Real-time output streaming
+```
 
 ## Coding Standards
 
