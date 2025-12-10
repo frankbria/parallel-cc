@@ -1,4 +1,12 @@
-# Sandbox Integration Plan v1.0.0
+# Multi-Provider Sandbox Architecture - v1.5 Specification
+
+> **Status:** 📋 **PLANNED** - This is the specification for v1.5 (next major release)
+>
+> **Current Release:** v1.0 implemented E2B-specific sandbox integration (see ROADMAP.md)
+>
+> **This Document:** Complete specification for provider-agnostic architecture planned for v1.5
+
+---
 
 ## Executive Summary
 

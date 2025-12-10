@@ -20,9 +20,10 @@ All versions are linked for easy navigation, and each section includes status, o
 - **[v0.3](#v03---mcp-server-for-status-queries)** - MCP Server for Status Queries ✅
 - **[v0.4](#v04---branch-merge-detection--rebase-assistance)** - Branch Merge Detection & Rebase Assistance ✅
 - **[v0.5](#v05---advanced-conflict-resolution)** - Advanced Conflict Resolution & Auto-fix Suggestions ✅
-- **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration for Autonomous Execution ✅ (current - major milestone)
+- **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration (E2B-specific implementation) ✅ (current)
 
 ### Planned Versions
+- **[v1.5](#v15---multi-provider-sandbox-architecture)** - Provider-Agnostic Sandbox Architecture (next - major enhancement)
 - **v2.0** - Enhanced observability and collaboration features (TBD)
 
 ---
@@ -648,6 +649,221 @@ After E2B integration:
 3. Parallel E2B sessions: Run multiple independent tasks simultaneously?
 4. Cost optimization: Sandbox pooling, pause/resume, cheaper tiers?
 5. APM orchestrator integration: Deep integration with apm-fhb workflows?
+
+---
+
+## v1.5 - Multi-Provider Sandbox Architecture
+
+**Status:** Planned (Next Major Enhancement)
+
+### Overview
+
+**Strategic Evolution:** Transform parallel-cc's E2B-specific sandbox integration (v1.0) into a **provider-agnostic architecture** supporting multiple sandboxing backends. This enables users to choose the best sandbox provider for their use case, budget, and security requirements.
+
+**Why v1.5:** This is a critical stepping stone between v1.0 (single provider) and v2.0 (advanced features). The abstraction layer built here will enable future innovations while maintaining backward compatibility with existing E2B workflows.
+
+### Motivation
+
+v1.0 proved the value of autonomous sandbox execution, but users have different needs:
+- **Local development** → Want free, instant sandboxing without cloud costs
+- **Enterprise teams** → Need SOC2/HIPAA compliance (Daytona)
+- **Edge workloads** → Require ultra-low latency (Cloudflare Workers)
+- **Cost optimization** → Want to switch providers based on task duration/complexity
+
+### Provider Ecosystem
+
+| Provider | Type | Best For | Startup | Cost | Compliance |
+|----------|------|----------|---------|------|------------|
+| **Native** (srt) | Local OS-level | Quick tasks, free dev | Instant | Free | N/A |
+| **Docker** | Local container | Cross-platform dev | 2-5s | Free | N/A |
+| **E2B** | Cloud VM | Long autonomous tasks | 150ms | $0.10/hr | Standard |
+| **Daytona** | Cloud enterprise | Regulated industries | 90ms | Custom | SOC2, HIPAA |
+| **Cloudflare** | Edge container | Short, distributed tasks | 100ms | Per-request | Standard |
+
+### Architecture: SandboxProvider Interface
+
+**Core Abstraction:**
+```typescript
+interface SandboxProvider {
+  // Lifecycle
+  create(config: SandboxConfig): Promise<SandboxInstance>;
+  destroy(instanceId: string): Promise<void>;
+
+  // File Operations
+  uploadFiles(instanceId: string, files: FileList): Promise<UploadResult>;
+  downloadFiles(instanceId: string): Promise<FileList>;
+
+  // Execution
+  execute(instanceId: string, command: string): AsyncGenerator<OutputChunk>;
+
+  // Status
+  isRunning(instanceId: string): Promise<boolean>;
+  getMetrics(instanceId: string): Promise<SandboxMetrics>;
+}
+```
+
+**Provider Implementations:**
+- `NativeProvider` - Uses Anthropic's `srt` CLI (macOS Seatbelt, Linux bubblewrap)
+- `DockerProvider` - Uses Docker CLI/SDK
+- `E2BProvider` - Wraps existing E2B SDK (backward compatible)
+- `DaytonaProvider` - Integrates Daytona SDK
+- `CloudflareProvider` - Uses Cloudflare Workers API
+
+### Key Features
+
+#### 1. Provider Selection
+```bash
+# Via CLI flag (explicit)
+parallel-cc sandbox-run --provider docker --repo . --prompt "Run tests"
+
+# Via environment variable (default)
+export SANDBOX_PROVIDER=native
+parallel-cc sandbox-run --repo . --prompt "Quick fix"
+
+# Via config file (project-specific)
+# .parallel-cc.json: { "defaultProvider": "e2b" }
+parallel-cc sandbox-run --repo . --prompt "Long task"
+```
+
+#### 2. Provider Auto-Selection
+Smart provider selection based on task characteristics:
+```typescript
+// Heuristics:
+// - Task duration < 5min → Native/Docker (free)
+// - Task duration > 30min → E2B (reliable)
+// - Requires GPU → E2B/Daytona
+// - Enterprise repo → Daytona (compliance)
+// - Edge deployment → Cloudflare
+```
+
+#### 3. Provider Fallback Chain
+```yaml
+providers:
+  primary: native
+  fallback:
+    - docker      # If native fails
+    - e2b         # If docker unavailable
+  never:
+    - cloudflare  # Too expensive for this use case
+```
+
+#### 4. Unified Configuration
+```bash
+# Provider-specific configs via env vars
+NATIVE_SANDBOX_ROOT=/tmp/claude-sandbox
+DOCKER_IMAGE=claude-code:latest
+E2B_API_KEY=xxx
+E2B_TEMPLATE=base-v2
+DAYTONA_WORKSPACE_ID=xxx
+CLOUDFLARE_ACCOUNT_ID=xxx
+```
+
+### Database Schema Changes
+
+```sql
+-- Extend sessions table to track provider
+ALTER TABLE sessions ADD COLUMN provider TEXT DEFAULT 'local';
+ALTER TABLE sessions ADD COLUMN provider_instance_id TEXT;
+ALTER TABLE sessions ADD COLUMN provider_metadata TEXT; -- JSON blob
+
+-- Provider usage tracking
+CREATE TABLE provider_usage (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  session_id TEXT,
+  duration_seconds INTEGER,
+  cost_estimate REAL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+```
+
+### Implementation Phases
+
+**Phase 1: Abstraction Layer (Week 1-2)**
+- Define `SandboxProvider` interface and types
+- Extract E2B logic into `E2BProvider` class
+- Refactor `SandboxManager` to use provider abstraction
+- Add provider registry and factory pattern
+- Update CLI to accept `--provider` flag
+- Maintain 100% backward compatibility with v1.0
+
+**Phase 2: Native Provider (Week 3)**
+- Implement `NativeProvider` using Anthropic's srt CLI
+- Test on macOS (Seatbelt) and Linux (bubblewrap)
+- Add installation instructions for srt
+- Performance benchmarks vs. E2B
+
+**Phase 3: Docker Provider (Week 4)**
+- Implement `DockerProvider` using Docker SDK
+- Build official `claude-code` Docker image
+- Cross-platform testing (macOS, Linux, Windows)
+- Document Docker setup requirements
+
+**Phase 4: Advanced Providers (Week 5-6)**
+- Implement `DaytonaProvider` (if SDK available)
+- Implement `CloudflareProvider` (experimental)
+- Provider comparison benchmarks
+- Cost optimization recommendations
+
+**Phase 5: Polish (Week 7)**
+- Provider auto-selection heuristics
+- Fallback chain support
+- Comprehensive testing (all providers)
+- Migration guide from v1.0
+
+### Reference Documentation
+
+**Detailed Specification:** See `SANDBOX_INTEGRATION_PLAN.md` for:
+- Complete provider API specifications
+- Cross-platform OS considerations
+- Detailed risk analysis per provider
+- Performance benchmarks and trade-offs
+- Security model for each provider
+- Cost optimization strategies
+
+### Success Metrics
+
+- ✅ 100% backward compatibility with v1.0 E2B workflows
+- ✅ At least 3 providers fully implemented (Native, Docker, E2B)
+- ✅ Provider switching works seamlessly via config
+- ✅ No performance regression for E2B users
+- ✅ Local providers (Native/Docker) work offline
+- ✅ Comprehensive test coverage across all providers
+
+### Migration from v1.0
+
+**Zero-Breaking Changes:**
+```bash
+# v1.0 commands continue to work (default to E2B)
+parallel-cc sandbox-run --repo . --prompt "task"
+
+# v1.5 adds new capability
+parallel-cc sandbox-run --provider native --repo . --prompt "task"
+```
+
+**Configuration Migration:**
+```bash
+# Old (v1.0): E2B hardcoded
+E2B_API_KEY=xxx
+
+# New (v1.5): Provider-specific
+SANDBOX_PROVIDER=e2b  # Explicit default
+E2B_API_KEY=xxx
+```
+
+### Integration Points
+
+**With v1.0:**
+- Reuses all E2B code via `E2BProvider` wrapper
+- Same database schema (extended, not replaced)
+- Same CLI structure (new flags, not changed commands)
+
+**With v2.0:**
+- Provider abstraction enables advanced features:
+  - Multi-provider task distribution
+  - Cost-optimized provider selection
+  - Hybrid local+cloud execution
 
 ---
 
