@@ -233,8 +233,12 @@ parallel-cc watch-merges --once          # Run single merge detection poll
 parallel-cc merge-status                 # Show merge events history
 parallel-cc merge-status --subscriptions # Show active merge subscriptions
 
+# Database migration (v0.5+)
+parallel-cc migrate                      # Migrate to latest version (1.0.0)
+parallel-cc migrate --version 0.5.0      # Migrate to v0.5 schema only
+parallel-cc migrate --version 1.0.0      # Migrate to v1.0 for E2B sandbox features
+
 # Advanced conflict resolution (v0.5)
-parallel-cc migrate                      # Run database migration to v0.5 schema
 parallel-cc claims                       # List active file claims
 parallel-cc claims --file src/app.ts     # Filter by file path
 parallel-cc conflicts                    # View conflict resolution history
@@ -291,6 +295,9 @@ git merge <worktree-branch-name>
 ```bash
 # Prerequisites: E2B account and API key
 export E2B_API_KEY="your-key-here"
+
+# One-time setup: Migrate database to v1.0.0 for E2B features
+parallel-cc migrate --version 1.0.0
 
 # Step 1: Plan interactively (local)
 cd ~/projects/myrepo

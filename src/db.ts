@@ -562,7 +562,7 @@ export class SessionDB {
   /**
    * Get current schema version from metadata table
    */
-  private getSchemaVersion(): string | null {
+  getSchemaVersion(): string | null {
     try {
       const row = this.db.prepare(`
         SELECT value FROM schema_metadata WHERE key = 'version'
@@ -570,6 +570,21 @@ export class SessionDB {
       return row?.value || null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Check if E2B columns exist in sessions table (v1.0.0+)
+   */
+  hasE2BColumns(): boolean {
+    try {
+      const columns = this.db.prepare(`
+        SELECT name FROM pragma_table_info('sessions')
+        WHERE name IN ('execution_mode', 'sandbox_id', 'prompt', 'status', 'output_log')
+      `).all() as { name: string }[];
+      return columns.length === 5;
+    } catch {
+      return false;
     }
   }
 
