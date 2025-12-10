@@ -14,7 +14,7 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
-import { execSync, exec } from 'child_process';
+import { spawnSync, exec } from 'child_process';
 import { createReadStream, createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { logger } from '../logger.js';
@@ -163,16 +163,20 @@ export async function createTarball(
   const exclusions = await buildExclusionList(worktreePath);
   logger.debug(`Excluding ${exclusions.length} patterns from tarball`);
 
-  // Build tar command with exclusions
-  const excludeArgs = exclusions
-    .map(pattern => `--exclude='${pattern.replace(/'/g, "'\\''")}'`)
-    .join(' ');
-
-  const tarCommand = `tar -czf "${outputPath}" ${excludeArgs} -C "${worktreePath}" .`;
+  // Build tar arguments array (no shell interpolation for security)
+  const tarArgs = [
+    '-czf',
+    outputPath,
+    // Add exclusion patterns as separate arguments
+    ...exclusions.flatMap(pattern => ['--exclude', pattern]),
+    '-C',
+    worktreePath,
+    '.'
+  ];
 
   try {
-    // Execute tar command
-    execSync(tarCommand, {
+    // Execute tar command using spawnSync (no shell, prevents injection)
+    const result = spawnSync('tar', tarArgs, {
       stdio: 'pipe',
       maxBuffer: 100 * 1024 * 1024, // 100MB buffer
       env: {
@@ -180,6 +184,16 @@ export async function createTarball(
         GZIP: `-${GZIP_LEVEL}` // Set gzip compression level
       }
     });
+
+    // Check for errors
+    if (result.status !== 0) {
+      const stderr = result.stderr?.toString() || 'Unknown error';
+      throw new Error(`tar command failed with exit code ${result.status}: ${stderr}`);
+    }
+
+    if (result.error) {
+      throw result.error;
+    }
 
     // Get tarball stats
     const stats = await fs.stat(outputPath);
@@ -402,8 +416,20 @@ export async function downloadChangedFiles(
     const localTarPath = path.join('/tmp', `changed-files-${Date.now()}.tar.gz`);
     await fs.writeFile(localTarPath, tarballContent);
 
-    // Extract to local worktree
-    execSync(`tar -xzf "${localTarPath}" -C "${localPath}"`, { stdio: 'pipe' });
+    // Extract to local worktree using spawnSync (no shell, prevents injection)
+    const extractResult = spawnSync('tar', ['-xzf', localTarPath, '-C', localPath], {
+      stdio: 'pipe'
+    });
+
+    // Check for extraction errors
+    if (extractResult.status !== 0) {
+      const stderr = extractResult.stderr?.toString() || 'Unknown error';
+      throw new Error(`tar extraction failed with exit code ${extractResult.status}: ${stderr}`);
+    }
+
+    if (extractResult.error) {
+      throw extractResult.error;
+    }
 
     // Get download size
     const stats = await fs.stat(localTarPath);
