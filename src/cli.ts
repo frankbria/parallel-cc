@@ -24,6 +24,7 @@ import {
   installMcpServer,
   uninstallMcpServer,
   checkMcpStatus,
+  installWrapperScript,
   type InstallHooksOptions
 } from './hooks-installer.js';
 import { startMcpServer } from './mcp/index.js';
@@ -474,6 +475,18 @@ program
           console.log(chalk.dim(`  Path: ${result.hooks.settingsPath}`));
         }
 
+        // Report wrapper result
+        if (result.wrapper) {
+          if (result.wrapper.alreadyUpToDate) {
+            console.log(chalk.green('✓ Wrapper script already up to date'));
+          } else if (result.wrapper.success) {
+            console.log(chalk.green('✓ Wrapper script installed/updated'));
+          } else {
+            console.log(chalk.yellow(`⚠ Wrapper script failed: ${result.wrapper.error}`));
+          }
+          console.log(chalk.dim(`  Path: ${result.wrapper.wrapperPath}`));
+        }
+
         // Report alias result
         if (result.alias) {
           if (result.alias.alreadyInstalled) {
@@ -578,7 +591,19 @@ program
       }
 
       if (wantAlias) {
+        const wrapperResult = installWrapperScript();
         const aliasResult = installAlias();
+
+        if (wrapperResult.success) {
+          if (wrapperResult.alreadyUpToDate) {
+            console.log(chalk.green('✓ Wrapper script already up to date'));
+          } else {
+            console.log(chalk.green('✓ Wrapper script installed/updated'));
+          }
+          console.log(chalk.dim(`  Path: ${wrapperResult.wrapperPath}`));
+        } else {
+          console.log(chalk.yellow(`⚠ Wrapper script failed: ${wrapperResult.error}`));
+        }
 
         if (aliasResult.success) {
           if (aliasResult.alreadyInstalled) {
@@ -614,22 +639,39 @@ program
         return;
       }
 
-      const result = installAlias();
+      // Install wrapper script first
+      const wrapperResult = installWrapperScript();
+      const aliasResult = installAlias();
 
       if (options.json) {
-        console.log(JSON.stringify(result, null, 2));
-      } else if (result.success) {
-        if (result.alreadyInstalled) {
-          console.log(chalk.green('✓ Alias already installed'));
-        } else {
-          console.log(chalk.green('✓ Alias installed'));
-          console.log(chalk.dim(`  Shell: ${result.shell}`));
-          console.log(chalk.dim(`  Path: ${result.profilePath}`));
-          console.log(chalk.yellow('\nRestart your shell or run: source ' + result.profilePath));
-        }
+        console.log(JSON.stringify({ wrapper: wrapperResult, alias: aliasResult }, null, 2));
       } else {
-        console.error(chalk.red(`✗ Installation failed: ${result.error}`));
-        process.exit(1);
+        // Report wrapper result
+        if (wrapperResult.success) {
+          if (wrapperResult.alreadyUpToDate) {
+            console.log(chalk.green('✓ Wrapper script already up to date'));
+          } else {
+            console.log(chalk.green('✓ Wrapper script installed/updated'));
+          }
+          console.log(chalk.dim(`  Path: ${wrapperResult.wrapperPath}`));
+        } else {
+          console.log(chalk.yellow(`⚠ Wrapper script failed: ${wrapperResult.error}`));
+        }
+
+        // Report alias result
+        if (aliasResult.success) {
+          if (aliasResult.alreadyInstalled) {
+            console.log(chalk.green('✓ Alias already installed'));
+          } else {
+            console.log(chalk.green('✓ Alias installed'));
+            console.log(chalk.dim(`  Shell: ${aliasResult.shell}`));
+            console.log(chalk.dim(`  Path: ${aliasResult.profilePath}`));
+            console.log(chalk.yellow('\nRestart your shell or run: source ' + aliasResult.profilePath));
+          }
+        } else {
+          console.error(chalk.red(`✗ Alias failed: ${aliasResult.error}`));
+          process.exit(1);
+        }
       }
       return;
     }

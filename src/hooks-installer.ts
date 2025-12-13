@@ -5,9 +5,15 @@
  * Supports both global (~/.claude/settings.json) and local (.claude/settings.json) installation.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, copyFileSync, chmodSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+// Get package root directory
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PACKAGE_ROOT = resolve(__dirname, '..');
 
 export interface HookConfig {
   type: 'command';
@@ -657,6 +663,7 @@ export interface InstallAllResult {
   success: boolean;
   hooks?: InstallHooksResult;
   alias?: InstallAliasResult;
+  wrapper?: InstallWrapperResult;
   errors: string[];
 }
 
@@ -697,8 +704,16 @@ export function installAll(options: InstallAllOptions = {}): InstallAllResult {
     }
   }
 
-  // Install alias
+  // Install wrapper script and alias
   if (alias) {
+    const wrapperResult = installWrapperScript({ dryRun });
+    result.wrapper = wrapperResult;
+
+    if (!wrapperResult.success) {
+      result.success = false;
+      result.errors.push(`Wrapper script installation failed: ${wrapperResult.error}`);
+    }
+
     const aliasResult = installAlias({ dryRun });
     result.alias = aliasResult;
 
@@ -890,4 +905,76 @@ export function checkMcpStatus(): {
     installed: isMcpServerInstalled(settings),
     settingsPath
   };
+}
+
+// ============================================================================
+// Wrapper Script Installation
+// ============================================================================
+
+export interface InstallWrapperResult {
+  success: boolean;
+  wrapperPath: string;
+  alreadyUpToDate: boolean;
+  error?: string;
+}
+
+/**
+ * Install or update the claude-parallel wrapper script
+ * Copies scripts/claude-parallel.sh to ~/.local/bin/claude-parallel
+ */
+export function installWrapperScript(options: { dryRun?: boolean } = {}): InstallWrapperResult {
+  const { dryRun = false } = options;
+
+  const installDir = join(homedir(), '.local', 'bin');
+  const wrapperTarget = join(installDir, 'claude-parallel');
+  const wrapperSource = join(PACKAGE_ROOT, 'scripts', 'claude-parallel.sh');
+
+  const result: InstallWrapperResult = {
+    success: false,
+    wrapperPath: wrapperTarget,
+    alreadyUpToDate: false
+  };
+
+  try {
+    // Check if source file exists
+    if (!existsSync(wrapperSource)) {
+      result.error = `Wrapper script not found: ${wrapperSource}`;
+      return result;
+    }
+
+    // Ensure install directory exists
+    if (!existsSync(installDir)) {
+      if (!dryRun) {
+        mkdirSync(installDir, { recursive: true });
+      }
+    }
+
+    // Check if target is already up to date
+    if (existsSync(wrapperTarget)) {
+      try {
+        const sourceContent = readFileSync(wrapperSource, 'utf-8');
+        const targetContent = readFileSync(wrapperTarget, 'utf-8');
+
+        if (sourceContent === targetContent) {
+          result.success = true;
+          result.alreadyUpToDate = true;
+          return result;
+        }
+      } catch {
+        // If we can't read/compare, just proceed with copy
+      }
+    }
+
+    // Copy wrapper script
+    if (!dryRun) {
+      copyFileSync(wrapperSource, wrapperTarget);
+      chmodSync(wrapperTarget, 0o755); // rwxr-xr-x
+    }
+
+    result.success = true;
+    return result;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : 'Unknown error';
+    return result;
+  }
 }
