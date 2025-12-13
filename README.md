@@ -9,7 +9,7 @@
 
 **parallel-cc** enables both interactive and autonomous Claude Code workflows:
 - **Local mode**: Parallel worktree coordination for interactive development
-- **E2B Sandbox mode**: Long-running autonomous execution in isolated cloud VMs (v1.0)
+- **E2B Sandbox mode**: Long-running autonomous execution in isolated cloud VMs
 
 ## 📑 Table of Contents
 
@@ -37,15 +37,15 @@
 - 🧹 **Auto-cleanup** - Worktrees removed when sessions end
 - 💓 **Heartbeat monitoring** - Detect and clean up stale sessions
 - 🎯 **Zero configuration** - Works out of the box
-- 🔀 **Merge detection** - Know when parallel branches are merged (v0.4)
-- ⚠️ **Conflict checking** - Preview rebase conflicts before they happen (v0.4)
+- 🔀 **Merge detection** - Know when parallel branches are merged
+- ⚠️ **Conflict checking** - Preview rebase conflicts before they happen
 - 🤖 **MCP integration** - Claude can query session status and assist with rebases
-- 🔒 **File claims** - Coordinate exclusive/shared file access across parallel sessions (v0.5)
-- 🧠 **Conflict resolution** - Track and resolve semantic, structural, and concurrent edit conflicts (v0.5)
-- ⚡ **Auto-fix suggestions** - AI-generated conflict resolutions with confidence scores (v0.5)
-- 🔍 **AST analysis** - Deep semantic conflict detection using abstract syntax trees (v0.5)
+- 🔒 **File claims** - Coordinate exclusive/shared file access across parallel sessions
+- 🧠 **Conflict resolution** - Track and resolve semantic, structural, and concurrent edit conflicts
+- ⚡ **Auto-fix suggestions** - AI-generated conflict resolutions with confidence scores
+- 🔍 **AST analysis** - Deep semantic conflict detection using abstract syntax trees
 
-### E2B Sandbox Execution (v1.0)
+### E2B Sandbox Execution
 - ☁️ **Cloud sandboxes** - Execute Claude Code in isolated E2B VMs
 - ⏱️ **Long-running tasks** - Up to 1 hour of uninterrupted execution
 - 🔐 **Security hardened** - Shell injection prevention, input validation, resource cleanup
@@ -190,61 +190,81 @@ That's it! Each session is isolated. When you're done, just exit claude normally
 
 ## 🔧 CLI Commands
 
+### System & Installation
 ```bash
 # Check system health
 parallel-cc doctor
 
+# Installation & configuration
+parallel-cc install --all                # Install everything (hooks + alias + MCP)
+parallel-cc install --interactive        # Prompted installation
+parallel-cc install --hooks              # Interactive hook installation
+parallel-cc install --hooks --global     # Install hooks globally
+parallel-cc install --hooks --local      # Install hooks locally
+parallel-cc install --alias              # Add claude=claude-parallel alias
+parallel-cc install --alias --uninstall  # Remove alias
+parallel-cc install --mcp                # Configure MCP server in Claude settings
+parallel-cc install --status             # Check installation status
+
+# Database management
+parallel-cc migrate                      # Migrate to latest version (1.0.0)
+parallel-cc migrate --version 1.0.0      # Migrate to specific version
+```
+
+### Session Management
+```bash
 # Show active sessions
 parallel-cc status
 parallel-cc status --repo /path/to/repo
 parallel-cc status --json
+parallel-cc status --sandbox-only        # Show only E2B sandbox sessions
 
-# Full installation (hooks + alias + MCP)
-parallel-cc install --all                # Install everything
-parallel-cc install --interactive        # Prompted installation
-
-# Heartbeat hooks
-parallel-cc install --hooks              # Interactive mode
-parallel-cc install --hooks --global     # Install globally
-parallel-cc install --hooks --local      # Install locally
-
-# Shell alias
-parallel-cc install --alias              # Add claude=claude-parallel alias
-parallel-cc install --alias --uninstall  # Remove alias
-
-# MCP server configuration
-parallel-cc install --mcp                # Configure MCP server in Claude settings
-
-# Check installation status
-parallel-cc install --status
-
-# Manual registration (usually done by wrapper)
+# Session lifecycle (usually handled by wrapper)
 parallel-cc register --repo /path/to/repo --pid $$
-
-# Manual release (usually done by wrapper)
 parallel-cc release --pid $$
+parallel-cc cleanup                      # Clean up stale sessions
+```
 
-# Clean up stale sessions
-parallel-cc cleanup
-
-# Merge detection (v0.4)
+### Merge & Conflict Management
+```bash
+# Merge detection
 parallel-cc watch-merges                 # Start merge detection daemon
 parallel-cc watch-merges --once          # Run single merge detection poll
 parallel-cc merge-status                 # Show merge events history
 parallel-cc merge-status --subscriptions # Show active merge subscriptions
 
-# Database migration (v0.5+)
-parallel-cc migrate                      # Migrate to latest version (1.0.0)
-parallel-cc migrate --version 0.5.0      # Migrate to v0.5 schema only
-parallel-cc migrate --version 1.0.0      # Migrate to v1.0 for E2B sandbox features
-
-# Advanced conflict resolution (v0.5)
+# File claims & conflict resolution
 parallel-cc claims                       # List active file claims
 parallel-cc claims --file src/app.ts     # Filter by file path
 parallel-cc conflicts                    # View conflict resolution history
 parallel-cc conflicts --type SEMANTIC    # Filter by conflict type
 parallel-cc suggestions                  # List auto-fix suggestions
 parallel-cc suggestions --min-confidence 0.8  # Filter by confidence threshold
+```
+
+### E2B Sandbox Execution
+```bash
+# Run Claude Code in cloud sandbox
+parallel-cc sandbox-run --repo . --prompt "Implement feature X"
+parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+
+# Authentication options
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method api-key  # Use ANTHROPIC_API_KEY
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method oauth    # Use Claude subscription
+
+# Branch management
+parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
+parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch name
+parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
+
+# Monitoring & control
+parallel-cc sandbox-logs --session-id <id>       # View sandbox logs
+parallel-cc sandbox-logs --session-id <id> --follow  # Stream logs in real-time
+parallel-cc sandbox-download --session-id <id>   # Download results without terminating
+parallel-cc sandbox-kill --session-id <id>       # Terminate running sandbox
+
+# Testing
+parallel-cc sandbox-run --dry-run --repo .       # Test setup without execution
 ```
 
 ## 🔄 How Sessions Work
@@ -286,9 +306,9 @@ cd ~/projects/myrepo  # Go to main repo
 git merge <worktree-branch-name>
 ```
 
-## 🚀 E2B Sandbox Integration (v1.0)
+## 🚀 E2B Sandbox Integration
 
-**NEW:** Run autonomous Claude Code sessions in isolated cloud sandboxes for truly hands-free development.
+Run autonomous Claude Code sessions in isolated cloud sandboxes for truly hands-free development.
 
 ### Quick Start
 
@@ -324,42 +344,24 @@ git push origin HEAD:feature/my-feature
 - **Cost-Effective**: ~$0.10/hour for E2B compute time
 - **Git Integration**: Results automatically committed in worktrees for easy review
 
-### E2B Commands
+### Usage Examples
 
 ```bash
-# Basic execution (results downloaded as uncommitted changes)
+# Basic execution with TDD approach
 parallel-cc sandbox-run --repo . --prompt "Implement feature X with tests"
+
+# Execute from plan file
 parallel-cc sandbox-run --repo . --prompt-file PLAN.md
 
-# Authentication methods
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method api-key  # Default: uses ANTHROPIC_API_KEY
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method oauth    # Uses Claude subscription
-
-# Branch management (control how changes are applied)
-parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
-parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch + commit
-parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
-
-# Combined options
+# Full example with branch and OAuth auth
 parallel-cc sandbox-run \
   --repo . \
   --prompt "Implement auth system" \
   --auth-method oauth \
   --branch auto
-
-# Monitor active sandbox sessions
-parallel-cc status --sandbox-only
-parallel-cc sandbox-logs --session-id e2b-abc123
-
-# Download results without terminating
-parallel-cc sandbox-download --session-id e2b-abc123 --output ./results
-
-# Kill running sandbox
-parallel-cc sandbox-kill --session-id e2b-abc123
-
-# Test upload/download without execution
-parallel-cc sandbox-run --dry-run --repo .
 ```
+
+For complete E2B command reference, see the [CLI Commands](#-cli-commands) section above.
 
 ### Setup Requirements
 
@@ -374,31 +376,29 @@ See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and
 
 ## 🗺️ Roadmap
 
-**Completed:**
-- [x] **v0.1** - Project foundation (structure, types, schema)
-- [x] **v0.2** - Core infrastructure (CLI + SQLite + wrapper script)
-- [x] **v0.2.1** - Hook installation & configuration
-- [x] **v0.2.4** - Shell alias setup & full installation command
-- [x] **v0.3** - MCP server for status queries + >85% test coverage
-- [x] **v0.4** - Branch merge detection & rebase assistance
-- [x] **v0.5** - Advanced conflict resolution & auto-fix suggestions
-  - File claims system for coordinating file access
-  - Conflict detection (semantic, structural, concurrent edits)
-  - AST-based analysis with Babel parser
-  - AI-generated auto-fix suggestions with confidence scores
-  - MCP tools for conflict resolution workflows
-- [x] **v1.0** - E2B Sandbox Integration for autonomous execution 🚀 ← *Current*
-  - Isolated cloud sandbox execution with full permissions
-  - Plan-driven autonomous workflows (PLAN.md support)
-  - Real-time output monitoring and streaming
-  - Intelligent file sync with compression
-  - Timeout enforcement (1-hour max with warnings)
-  - Cost tracking and optimization
+### Current Version: v1.0 🚀
 
-**Future:**
-- [ ] **v1.1** - Enhanced E2B features (parallel sandboxes, pause/resume, private repo support)
+**Core Features:**
+- ✅ Parallel worktree coordination with automatic session management
+- ✅ SQLite-based session tracking with heartbeat monitoring
+- ✅ MCP server integration with 16 tools for Claude Code
+- ✅ Branch merge detection and rebase assistance
+- ✅ Advanced conflict resolution with AST analysis
+- ✅ AI-powered auto-fix suggestions with confidence scoring
+- ✅ E2B sandbox integration for autonomous execution
+- ✅ Plan-driven workflows with real-time monitoring
+- ✅ Intelligent file sync and cost tracking
 
-See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and future ideas.
+### What's Next
+
+**v1.1 - Enhanced E2B Features** (Planned)
+- [ ] Parallel sandbox execution (multiple tasks simultaneously)
+- [ ] Pause/resume functionality for long-running tasks
+- [ ] Private repository support with SSH key management
+- [ ] Enhanced cost optimization and budget controls
+- [ ] Sandbox templates for common workflows
+
+See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and complete version history.
 
 ## 🔍 Troubleshooting
 
