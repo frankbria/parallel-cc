@@ -492,6 +492,36 @@ parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
 - OAuth credentials are securely copied from ~/.claude/.credentials.json to sandbox
 - Both methods work identically once authenticated
 
+### Requirements & Limitations
+
+**Environment Variables:**
+```bash
+# Required for Claude authentication (choose one)
+export ANTHROPIC_API_KEY="sk-ant-..."  # For API key mode
+# OR run /login for OAuth mode
+
+# Recommended for GitHub operations
+export GITHUB_TOKEN="ghp_..."  # For gh CLI authentication
+```
+
+**Installed Tools:**
+The sandbox automatically installs:
+- GitHub CLI (`gh`) - for repository operations
+- Git - for version control
+- Node.js & npm - pre-installed in anthropic-claude-code template
+
+**Known Limitations:**
+1. **Interactive Questions**: When Claude asks questions for clarification, execution will pause/complete prematurely
+   - **Workaround**: Provide all necessary context in the prompt upfront
+   - Example: Instead of "Fix issue #84", use "Fix issue #84: [describe the issue details]"
+
+2. **Claude Update**: Skipped in sandboxes due to permission issues with global npm installations
+   - The anthropic-claude-code template includes Claude Code 1.0.67+, which is sufficient
+
+3. **GitHub Authentication**: If your task requires GitHub operations:
+   - Set GITHUB_TOKEN environment variable before running
+   - Token needs appropriate scopes (repo, issues, etc.)
+
 ### Cost Expectations
 
 **E2B Pricing:**

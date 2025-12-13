@@ -263,15 +263,15 @@ export async function executeClaudeInSandbox(
       }
     }
 
-    // Step 2: Run Claude update
-    logger.info('Step 2/5: Ensuring latest Claude Code version...');
-    const updateResult = await runClaudeUpdate(sandbox, logger, opts.authMethod);
-    if (!updateResult.success) {
-      logger.warn(`Claude update failed, continuing anyway: ${updateResult.error}`);
-      // Non-fatal: continue execution even if update fails
-    } else {
-      logger.info(`Claude version: ${updateResult.version}`);
+    // Step 2: Setup additional CLI tools (gh, etc.)
+    logger.info('Step 2/5: Installing GitHub CLI and other tools...');
+    const toolsSetup = await setupAdditionalTools(sandbox, logger);
+    if (!toolsSetup) {
+      logger.warn('Some tools failed to install, continuing anyway');
     }
+
+    // Note: Skipping claude update because global npm installations can't update
+    // without sudo. The anthropic-claude-code template comes with a recent version.
 
     // Step 3: Execute Claude with prompt
     logger.info('Step 3/5: Executing Claude Code...');
@@ -423,6 +423,58 @@ async function setupOAuthCredentials(
 }
 
 /**
+ * Setup additional CLI tools needed for development
+ *
+ * Installs common tools like GitHub CLI that Claude Code needs to interact
+ * with external services.
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @returns True if setup succeeded
+ */
+async function setupAdditionalTools(
+  sandbox: Sandbox,
+  logger: Logger
+): Promise<boolean> {
+  logger.info('Installing additional CLI tools...');
+
+  try {
+    // Install GitHub CLI (gh)
+    // Check if already installed first
+    const ghCheck = await sandbox.commands.run('which gh', { timeoutMs: 5000 });
+    if (ghCheck.exitCode === 0) {
+      logger.info('GitHub CLI already installed');
+      return true;
+    }
+
+    logger.info('Installing GitHub CLI...');
+    const installGh = await sandbox.commands.run(
+      [
+        // GitHub CLI installation for Debian/Ubuntu
+        'curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg',
+        'sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg',
+        'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null',
+        'sudo apt-get update -qq',
+        'sudo apt-get install -y gh'
+      ].join(' && '),
+      { timeoutMs: 120000 } // 2 minutes for installation
+    );
+
+    if (installGh.exitCode === 0) {
+      logger.info('GitHub CLI installed successfully');
+      return true;
+    } else {
+      logger.error(`GitHub CLI installation failed: exit code ${installGh.exitCode}`);
+      logger.error(`stderr: ${installGh.stderr}`);
+      return false;
+    }
+  } catch (error) {
+    logger.error('Additional tools setup failed', error);
+    return false;
+  }
+}
+
+/**
  * Ensure latest Claude Code version is installed
  *
  * Runs `claude update` in the sandbox to ensure the latest version.
@@ -545,12 +597,25 @@ export async function runClaudeWithPrompt(
     const remoteLogPath = await createTempLogFile(sandbox);
     logger.debug(`Created output log: ${remoteLogPath}`);
 
+    // Build environment variables string for the command
+    const envVars: string[] = [];
+
+    // Add GITHUB_TOKEN if available (for gh CLI operations)
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (githubToken) {
+      envVars.push(`GITHUB_TOKEN=${githubToken}`);
+      logger.debug('GITHUB_TOKEN will be passed to sandbox');
+    } else {
+      logger.debug('GITHUB_TOKEN not set - GitHub operations may require authentication');
+    }
+
     // Build Claude command based on auth method
     let command: string;
     if (options.authMethod === 'oauth') {
-      // OAuth mode: credentials already setup in sandbox, no env var needed
+      // OAuth mode: credentials already setup in sandbox, no env var needed for Claude
       logger.debug('Using OAuth authentication (credentials already configured)');
-      command = `cd ${options.workingDir} && echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
+      const envPrefix = envVars.length > 0 ? envVars.join(' ') + ' ' : '';
+      command = `cd ${options.workingDir} && ${envPrefix}echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
     } else {
       // API key mode: pass ANTHROPIC_API_KEY as environment variable
       const apiKey = process.env.ANTHROPIC_API_KEY || '';
@@ -558,10 +623,9 @@ export async function runClaudeWithPrompt(
         logger.warn('ANTHROPIC_API_KEY not set - Claude execution may fail with authentication error');
       }
       logger.debug('Using API key authentication');
-      command = CLAUDE_COMMAND_TEMPLATE
-        .replace('{workingDir}', options.workingDir)
-        .replace('{apiKey}', apiKey)
-        .replace('{prompt}', sanitizedPrompt);
+      envVars.unshift(`ANTHROPIC_API_KEY=${apiKey}`); // Add at front
+      const envPrefix = envVars.join(' ') + ' ';
+      command = `cd ${options.workingDir} && ${envPrefix}echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
     }
 
     // Start output monitoring (if enabled)
