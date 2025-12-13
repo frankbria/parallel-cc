@@ -2,15 +2,35 @@
 # claude-parallel - Wrapper that handles worktree coordination for parallel Claude Code sessions
 #
 # This script:
-# 1. Detects if you're in a git repo
-# 2. Registers with the parallel-cc coordinator
-# 3. If parallel sessions exist, creates a worktree and cd's into it
-# 4. Launches claude in the correct directory
+# 1. Detects if the command is a parallel-cc command and forwards it
+# 2. Detects if you're in a git repo
+# 3. Registers with the parallel-cc coordinator
+# 4. If parallel sessions exist, creates a worktree and cd's into it
+# 5. Launches claude in the correct directory
 #
-# Usage: claude-parallel [claude args...]
+# Usage: claude-parallel [command] [args...]
 # Recommended: alias claude='claude-parallel'
 
 set -e
+
+# List of parallel-cc commands that should be forwarded directly
+# These are administrative commands, not interactive Claude sessions
+PARALLEL_CC_COMMANDS=(
+  "register" "release" "heartbeat" "status" "cleanup" "doctor"
+  "mcp-serve" "update" "migrate" "watch-merges" "merge-status"
+  "install" "sandbox-run" "sandbox-logs" "sandbox-download" "sandbox-kill"
+)
+
+# Check if the first argument is a parallel-cc command
+if [ $# -gt 0 ]; then
+  FIRST_ARG="$1"
+  for cmd in "${PARALLEL_CC_COMMANDS[@]}"; do
+    if [ "$FIRST_ARG" = "$cmd" ]; then
+      # Forward to parallel-cc instead of claude
+      exec parallel-cc "$@"
+    fi
+  done
+fi
 
 # Get repo path - if not in a git repo, just run claude normally
 REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null || true)
