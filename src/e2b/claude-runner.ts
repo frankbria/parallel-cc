@@ -273,10 +273,15 @@ export async function executeClaudeInSandbox(
  */
 async function ensureClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boolean> {
   // Check if claude CLI is available
-  const check = await sandbox.commands.run('which claude', { timeoutMs: 10000 });
-  if (check.exitCode === 0) {
-    logger.info('Claude Code CLI detected (pre-installed)');
-    return true;
+  try {
+    const check = await sandbox.commands.run('which claude', { timeoutMs: 10000 });
+    if (check.exitCode === 0) {
+      logger.info('Claude Code CLI detected (pre-installed)');
+      return true;
+    }
+  } catch (error) {
+    logger.warn(`Failed to check for Claude CLI: ${error instanceof Error ? error.message : String(error)}`);
+    // Fall through to install attempt; if install isn't possible, we'll return false.
   }
 
   logger.info('Claude Code not found - installing from npm...');
@@ -284,8 +289,17 @@ async function ensureClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boole
 
   try {
     // Install Node.js and Claude Code CLI
+    // Includes apt-get availability check for non-Debian images
     const install = await sandbox.commands.run(
-      `apt-get update -qq && apt-get install -y curl nodejs npm && npm install -g @anthropic-ai/claude-code`,
+      [
+        // Fail fast if apt-get isn't available (non-Debian images)
+        'command -v apt-get >/dev/null 2>&1 || (echo "apt-get not available (non-Debian image)" >&2; exit 127)',
+        'DEBIAN_FRONTEND=noninteractive apt-get update -qq',
+        'DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl nodejs npm',
+        'npm install -g @anthropic-ai/claude-code',
+        // Re-verify presence on PATH
+        'which claude'
+      ].join(' && '),
       { timeoutMs: 180000 } // 3 minutes for installation
     );
 

@@ -42,6 +42,7 @@ describe('SandboxManager', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    delete process.env.E2B_TEMPLATE;
 
     // Create mock logger
     mockLogger = createMockLogger();
@@ -69,6 +70,7 @@ describe('SandboxManager', () => {
   afterEach(() => {
     vi.clearAllTimers();
     delete process.env.E2B_API_KEY;
+    delete process.env.E2B_TEMPLATE;
   });
 
   describe('constructor', () => {

@@ -474,7 +474,7 @@ export interface SuggestionFilters {
 export interface E2BSessionConfig {
   claudeVersion?: string; // e.g., "1.0.0" or "latest"
   e2bSdkVersion: string; // Pin E2B SDK version
-  sandboxImage: string; // Recommended: "anthropic-claude-code" (pre-installed Claude Code). Fallback: "base" requires manual Node.js + npm install @anthropic-ai/claude-code
+  sandboxImage: string; // Recommended: "anthropic-claude-code" (pre-installed Claude Code). Fallback: "base" or custom images auto-install via apt-get (Debian/Ubuntu required) then npm install -g @anthropic-ai/claude-code
   timeoutMinutes?: number; // Default: 60
   warningThresholds?: number[]; // Default: [30, 50] minutes
 }

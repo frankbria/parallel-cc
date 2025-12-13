@@ -1351,14 +1351,18 @@ program
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
-  .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code)', 'anthropic-claude-code')
+  .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code or E2B_TEMPLATE env var)')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
   .option('--no-commit', 'Skip auto-commit of results to worktree')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
+    // Precedence: CLI option > E2B_TEMPLATE env var > default 'anthropic-claude-code'
+    const sandboxImage = options.template ||
+                         (process.env.E2B_TEMPLATE?.trim() || '') ||
+                         'anthropic-claude-code';
     const sandboxManager = new SandboxManager(logger, {
-      sandboxImage: options.template || 'anthropic-claude-code'
+      sandboxImage
     });
     let sandboxId: string | null = null;
 

@@ -18,10 +18,11 @@ import {
 } from '../types.js';
 
 // Default configuration
+const envTemplate = process.env.E2B_TEMPLATE?.trim();
 const DEFAULT_CONFIG: Required<E2BSessionConfig> = {
   claudeVersion: 'latest',
   e2bSdkVersion: '1.13.2',
-  sandboxImage: process.env.E2B_TEMPLATE || 'anthropic-claude-code', // E2B template with pre-installed Claude Code
+  sandboxImage: (envTemplate && envTemplate.length > 0) ? envTemplate : 'anthropic-claude-code', // E2B template with pre-installed Claude Code
   timeoutMinutes: 60,
   warningThresholds: [30, 50]
 };
