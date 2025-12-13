@@ -355,8 +355,8 @@ program
       console.log(chalk.dim(`  Schema version: ${schemaVersion || 'none (pre-0.5.0)'}`));
 
       if (!hasE2B) {
-        console.log(chalk.yellow('  ⚠ E2B sandbox features require v1.0.0 migration'));
-        console.log(chalk.dim('    Run: parallel-cc migrate --version 1.0.0'));
+        console.log(chalk.yellow('  ⚠ Database schema needs update for E2B sandbox features'));
+        console.log(chalk.dim('    Run: parallel-cc update'));
       } else {
         console.log(chalk.green('  ✓ E2B sandbox features available'));
       }
@@ -499,6 +499,27 @@ program
           result.success = false;
         }
         console.log(chalk.dim(`  Path: ${mcpResult.settingsPath}`));
+
+        // Automatically migrate database to latest version (v1.0)
+        console.log(chalk.blue('\n⚙  Updating database schema...'));
+        try {
+          const coordinator = new Coordinator();
+          const db = coordinator['db'];
+          const migrationResult = await db.migrateToLatest();
+
+          if (migrationResult.migrations.length === 0) {
+            console.log(chalk.green('✓ Database already at latest version'));
+          } else {
+            console.log(chalk.green('✓ Database updated successfully'));
+            console.log(chalk.dim(`  Migrations applied: v${migrationResult.migrations.join(', v')}`));
+          }
+          console.log(chalk.dim(`  Schema version: ${migrationResult.to}`));
+          coordinator.close();
+        } catch (error) {
+          console.log(chalk.yellow('⚠ Database migration failed'));
+          console.log(chalk.dim(`  ${error instanceof Error ? error.message : 'Unknown error'}`));
+          console.log(chalk.dim('  You can run migrations manually: parallel-cc update'));
+        }
 
         if (!result.success) {
           process.exit(1);
@@ -944,6 +965,61 @@ program
   });
 
 /**
+ * Update command - automatically migrate to latest version
+ */
+program
+  .command('update')
+  .description('Update database schema to latest version (v1.0.0) - runs all necessary migrations')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const coordinator = new Coordinator();
+    try {
+      const db = coordinator['db'];
+      const currentVersion = db.getSchemaVersion();
+
+      if (!options.json) {
+        console.log(chalk.bold('\nUpdating parallel-cc database schema\n'));
+        console.log(chalk.dim(`Current version: ${currentVersion || 'none'}`));
+        console.log(chalk.dim('Target version: 1.0.0\n'));
+      }
+
+      const result = await db.migrateToLatest();
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: true,
+          from: result.from,
+          to: result.to,
+          migrations: result.migrations
+        }));
+      } else {
+        if (result.migrations.length === 0) {
+          console.log(chalk.green('✓ Already at latest version'));
+        } else {
+          console.log(chalk.green('✓ Update completed successfully\n'));
+          console.log(chalk.dim('Migrations applied:'));
+          for (const version of result.migrations) {
+            console.log(chalk.dim(`  - v${version}`));
+          }
+          console.log('');
+          console.log(chalk.dim('Database is now at version 1.0.0'));
+          console.log(chalk.dim('E2B sandbox features are now available'));
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Update failed: ${errorMessage}`));
+      }
+      process.exit(1);
+    } finally {
+      coordinator.close();
+    }
+  });
+
+/**
  * Database migration (v0.5+)
  * Migrate database schema to support various features
  */
@@ -1250,9 +1326,9 @@ program
             requiredVersion: '1.0.0'
           }));
         } else {
-          console.error(chalk.red('✗ E2B sandbox features require database migration to v1.0.0'));
+          console.error(chalk.red('✗ E2B sandbox features require database schema update'));
           console.error(chalk.dim(`  Current version: ${currentVersion || 'none'}`));
-          console.error(chalk.yellow('  Run: parallel-cc migrate --version 1.0.0'));
+          console.error(chalk.yellow('  Run: parallel-cc update'));
         }
         process.exit(1);
       }

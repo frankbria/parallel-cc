@@ -277,11 +277,12 @@ CREATE INDEX idx_subscriptions_active ON subscriptions(is_active);
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
 | `mcp-serve` | Start MCP server (stdio transport) |
+| `update` | Update database schema to latest version (v1.0.0) - runs all necessary migrations |
 | `watch-merges` | Start merge detection daemon (v0.4) |
 | `watch-merges --once` | Run single merge detection poll (v0.4) |
 | `merge-status` | Show merge events history (v0.4) |
 | `merge-status --subscriptions` | Show active merge subscriptions (v0.4) |
-| `install --all` | Install hooks globally + alias + MCP |
+| `install --all` | Install hooks globally + alias + MCP + update database |
 | `install --interactive` | Prompted installation for all options |
 | `install --hooks` | Install heartbeat hooks (interactive) |
 | `install --hooks --global` | Install hooks to ~/.claude/settings.json |

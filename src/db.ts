@@ -3,8 +3,8 @@
  */
 
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, readFileSync, copyFileSync } from 'fs';
-import { dirname, join as pathJoin } from 'path';
+import { existsSync, mkdirSync, readFileSync, copyFileSync, unlinkSync } from 'fs';
+import { dirname, join as pathJoin, resolve as pathResolve } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
@@ -72,9 +72,12 @@ function safeParseJSON(json: string | null | undefined): any {
 
 export class SessionDB {
   private db: Database.Database;
+  private dbPath: string; // Cached absolute path to database file
 
   constructor(dbPath?: string) {
     const resolvedPath = this.resolvePath(dbPath ?? DEFAULT_CONFIG.dbPath);
+    // Cache the absolute path to avoid issues with process.chdir()
+    this.dbPath = pathResolve(resolvedPath);
 
     // Ensure directory exists
     const dir = dirname(resolvedPath);
@@ -531,7 +534,9 @@ export class SessionDB {
       copyFileSync(dbPath, backupPath);
 
       // Read migration SQL
-      const migrationPath = pathJoin(process.cwd(), 'migrations', 'v0.5.0.sql');
+      // Resolve migrations relative to package root, not process.cwd()
+      // This ensures migrations are found regardless of where the process is run
+      const migrationPath = pathJoin(PACKAGE_ROOT, 'migrations', 'v0.5.0.sql');
       if (!existsSync(migrationPath)) {
         throw new Error(`Migration file not found: ${migrationPath}`);
       }
@@ -1409,6 +1414,48 @@ export class SessionDB {
   // ============================================================================
 
   /**
+   * Migrate to the latest schema version automatically
+   *
+   * This method checks the current schema version and runs all necessary
+   * migrations to bring the database up to v1.0.0 (the latest version).
+   *
+   * @throws Error if migration fails
+   */
+  async migrateToLatest(): Promise<{ from: string | null; to: string; migrations: string[] }> {
+    const currentVersion = this.getSchemaVersion();
+    const targetVersion = '1.0.0';
+    const migrationsRun: string[] = [];
+
+    logger.info(`Current schema version: ${currentVersion || 'none'}`);
+    logger.info(`Target schema version: ${targetVersion}`);
+
+    if (currentVersion === targetVersion) {
+      logger.info('Already at latest version, no migrations needed');
+      return { from: currentVersion, to: targetVersion, migrations: [] };
+    }
+
+    // Determine which migrations to run
+    if (!currentVersion || currentVersion < '0.5.0') {
+      logger.info('Running v0.5.0 migration...');
+      await this.migrateToV05();
+      migrationsRun.push('0.5.0');
+    }
+
+    if (!currentVersion || currentVersion < '1.0.0') {
+      logger.info('Running v1.0.0 migration...');
+      await this.runMigration('1.0.0');
+      migrationsRun.push('1.0.0');
+    }
+
+    logger.info(`Migration complete: ${currentVersion || 'none'} → ${targetVersion}`);
+    return {
+      from: currentVersion,
+      to: targetVersion,
+      migrations: migrationsRun
+    };
+  }
+
+  /**
    * Run a database migration with automatic backup
    *
    * @param version - Migration version (e.g., "1.0.0")
@@ -1428,13 +1475,13 @@ export class SessionDB {
       }
 
       // Create backup
-      const dbPath = this.db.name;
-      if (!existsSync(dbPath)) {
-        throw new Error(`Database file not found: ${dbPath}`);
+      // Use cached absolute path to avoid issues with process.chdir()
+      if (!existsSync(this.dbPath)) {
+        throw new Error(`Database file not found: ${this.dbPath}`);
       }
-      const backupPath = `${dbPath}.v${currentVersion || 'pre-migration'}.backup`;
+      const backupPath = `${this.dbPath}.v${currentVersion || 'pre-migration'}.backup`;
       logger.info(`Creating backup at: ${backupPath}`);
-      copyFileSync(dbPath, backupPath);
+      copyFileSync(this.dbPath, backupPath);
 
       // Read migration SQL
       // Resolve migrations relative to package root, not process.cwd()
@@ -1473,8 +1520,8 @@ export class SessionDB {
     try {
       logger.warn(`Rolling back to v${version}`);
 
-      const dbPath = this.db.name;
-      const backupPath = `${dbPath}.v${version}.backup`;
+      // Use cached absolute path to avoid issues with process.chdir()
+      const backupPath = `${this.dbPath}.v${version}.backup`;
 
       if (!existsSync(backupPath)) {
         throw new Error(`Backup file not found: ${backupPath}`);
@@ -1483,19 +1530,28 @@ export class SessionDB {
       // Close current database connection
       this.db.close();
 
+      // Clean up WAL and SHM files to ensure clean restore
+      const walPath = `${this.dbPath}-wal`;
+      const shmPath = `${this.dbPath}-shm`;
+      if (existsSync(walPath)) {
+        unlinkSync(walPath);
+      }
+      if (existsSync(shmPath)) {
+        unlinkSync(shmPath);
+      }
+
       // Restore from backup
       logger.info(`Restoring database from: ${backupPath}`);
-      copyFileSync(backupPath, dbPath);
+      copyFileSync(backupPath, this.dbPath);
 
       // Reconnect to database
-      this.db = new Database(dbPath);
+      this.db = new Database(this.dbPath);
       this.db.pragma('journal_mode = WAL');
       this.db.pragma('busy_timeout = 5000');
 
-      // Note: We don't call init() here because the restored database
-      // already has all tables from the backup. init() would try to create
-      // tables that already exist, which is safe due to IF NOT EXISTS,
-      // but unnecessary.
+      // Call init() to ensure database is properly initialized
+      // This is safe because all CREATE statements use IF NOT EXISTS
+      this.init();
 
       // Verify version
       const restoredVersion = this.getSchemaVersion();
