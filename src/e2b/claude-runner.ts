@@ -263,8 +263,15 @@ export async function executeClaudeInSandbox(
       }
     }
 
+    // Step 1.9: Initialize git repository (needed for download and gh CLI)
+    logger.info('Step 1.9/5: Initializing git repository...');
+    const gitInit = await initializeGitRepo(sandbox, logger, opts.workingDir);
+    if (!gitInit) {
+      logger.warn('Git initialization failed - download and GitHub operations may not work');
+    }
+
     // Step 2: Setup additional CLI tools (gh, etc.)
-    logger.info('Step 2/5: Installing GitHub CLI and other tools...');
+    logger.info('Step 2/5: Installing MCP servers and tools...');
     const toolsSetup = await setupAdditionalTools(sandbox, logger);
     if (!toolsSetup) {
       logger.warn('Some tools failed to install, continuing anyway');
@@ -418,6 +425,130 @@ async function setupOAuthCredentials(
     }
   } catch (error) {
     logger.error('OAuth credentials setup failed', error);
+    return false;
+  }
+}
+
+/**
+ * Initialize a git repository in the sandbox workspace
+ *
+ * Since we exclude .git from uploads (to save bandwidth), we need to initialize
+ * a fresh git repo in the sandbox. This enables:
+ * - Git commands for tracking changes (needed for download)
+ * - GitHub CLI operations (gh issue, gh pr, etc.)
+ * - Git-based workflows in Claude Code
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @param workingDir - Working directory path (default: /workspace)
+ * @returns True if git was successfully initialized
+ */
+async function initializeGitRepo(
+  sandbox: Sandbox,
+  logger: Logger,
+  workingDir: string = '/workspace'
+): Promise<boolean> {
+  logger.info('Initializing git repository in sandbox workspace...');
+
+  try {
+    // Step 1: Initialize git repo
+    const initResult = await sandbox.commands.run('git init', {
+      cwd: workingDir,
+      timeoutMs: 10000
+    });
+
+    if (initResult.exitCode !== 0) {
+      logger.error('Failed to initialize git repository');
+      logger.error(`stderr: ${initResult.stderr}`);
+      return false;
+    }
+
+    // Step 2: Configure git user (required for commits)
+    const configName = await sandbox.commands.run(
+      'git config user.name "E2B Sandbox"',
+      { cwd: workingDir, timeoutMs: 5000 }
+    );
+    const configEmail = await sandbox.commands.run(
+      'git config user.email "sandbox@e2b.dev"',
+      { cwd: workingDir, timeoutMs: 5000 }
+    );
+
+    if (configName.exitCode !== 0 || configEmail.exitCode !== 0) {
+      logger.warn('Failed to configure git user, but continuing');
+    }
+
+    // Step 3: Create initial commit
+    const addResult = await sandbox.commands.run('git add .', {
+      cwd: workingDir,
+      timeoutMs: 30000
+    });
+
+    if (addResult.exitCode !== 0) {
+      logger.error('Failed to stage files for git commit');
+      logger.error(`stderr: ${addResult.stderr}`);
+      return false;
+    }
+
+    const commitResult = await sandbox.commands.run(
+      'git commit -m "Initial workspace state"',
+      { cwd: workingDir, timeoutMs: 30000 }
+    );
+
+    if (commitResult.exitCode !== 0) {
+      logger.error('Failed to create initial commit');
+      logger.error(`stderr: ${commitResult.stderr}`);
+      return false;
+    }
+
+    // Step 4: Configure git remote (needed for gh CLI)
+    // Try to get the remote URL from the local repo
+    try {
+      const { execSync } = await import('child_process');
+      const { realpathSync } = await import('fs');
+
+      // Get the real path of the working directory (resolve symlinks)
+      const realWorkDir = realpathSync(process.cwd());
+
+      // Get remote URL from local git repo
+      const remoteUrl = execSync('git remote get-url origin', {
+        cwd: realWorkDir,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'] // Suppress stderr
+      }).trim();
+
+      if (remoteUrl) {
+        logger.debug(`Setting git remote origin to: ${remoteUrl}`);
+        const remoteResult = await sandbox.commands.run(
+          `git remote add origin "${remoteUrl}"`,
+          { cwd: workingDir, timeoutMs: 5000 }
+        );
+
+        if (remoteResult.exitCode === 0) {
+          logger.info(`Git remote configured: ${remoteUrl}`);
+        } else {
+          logger.warn('Failed to set git remote, but continuing');
+        }
+      }
+    } catch (error) {
+      logger.debug('Could not detect git remote from local repo (not a git repo or no remote)');
+    }
+
+    // Step 5: Verify git is working
+    const statusResult = await sandbox.commands.run('git status', {
+      cwd: workingDir,
+      timeoutMs: 5000
+    });
+
+    if (statusResult.exitCode === 0) {
+      logger.info('Git repository initialized successfully');
+      logger.debug(`Git status: ${statusResult.stdout?.substring(0, 100)}`);
+      return true;
+    } else {
+      logger.error('Git repository verification failed');
+      return false;
+    }
+  } catch (error) {
+    logger.error('Git initialization failed', error);
     return false;
   }
 }

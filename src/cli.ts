@@ -1349,14 +1349,33 @@ program
  */
 program
   .command('sandbox-run')
-  .description('Execute autonomous task in E2B sandbox with full worktree isolation (v1.0). Uses anthropic-claude-code template by default for Claude Code support.')
+  .description(`Execute autonomous task in E2B sandbox with full worktree isolation (v1.0)
+
+Authentication:
+  --auth-method api-key   Use ANTHROPIC_API_KEY (default, pay-as-you-go)
+  --auth-method oauth     Use Claude subscription (run /login first)
+
+Branch Management:
+  (no --branch)           Download as uncommitted changes (default - maximum control)
+  --branch auto           Auto-generate branch name and commit (convenience)
+  --branch <name>         Specify branch name and commit (custom naming)
+
+Examples:
+  # Default: uncommitted changes, review before committing
+  parallel-cc sandbox-run --repo . --prompt "Fix bug"
+
+  # OAuth auth + auto branch
+  parallel-cc sandbox-run --repo . --prompt "Add feature" --auth-method oauth --branch auto
+
+  # Custom branch name
+  parallel-cc sandbox-run --repo . --prompt "Fix #42" --branch feature/issue-42`)
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
   .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code or E2B_TEMPLATE env var)')
   .option('--auth-method <method>', 'Authentication method: api-key (ANTHROPIC_API_KEY env var) or oauth (Claude subscription credentials)', 'api-key')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
-  .option('--no-commit', 'Skip auto-commit of results to worktree')
+  .option('--branch <name>', 'Create feature branch for changes: "auto" (auto-generate name) or specify branch name. Default: no branch, uncommitted changes')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1646,36 +1665,85 @@ program
         console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
       }
 
-      // Commit changes if requested
-      if (options.commit !== false) {
+      // Create branch and commit if requested
+      if (options.branch) {
         if (!options.json) {
-          console.log(chalk.blue('\nCommitting changes to worktree...'));
+          console.log(chalk.blue('\nCreating feature branch...'));
         }
 
         try {
-          const commitMsg = `E2B sandbox execution: ${sessionId}\n\nPrompt: ${prompt.substring(0, 500)}${prompt.length > 500 ? '...' : ''}\nSandbox: ${sandboxId}\nExecution time: ${(executionResult.executionTime / 1000 / 60).toFixed(1)} minutes`;
+          // Generate branch name
+          let branchName: string;
+          if (options.branch === 'auto') {
+            // Auto-generate from prompt and timestamp
+            const slug = prompt
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/^-+|-+$/g, '') // Remove leading/trailing dashes
+              .slice(0, 50);
+            const timestamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+            branchName = `e2b/${slug}-${timestamp}`;
+          } else {
+            branchName = options.branch;
+          }
 
-          // Git add and commit
+          if (!options.json) {
+            console.log(chalk.dim(`  Branch: ${branchName}`));
+          }
+
+          // Create and checkout branch
+          const createBranchResult = spawnSync('git', ['checkout', '-b', branchName], {
+            cwd: worktreePath,
+            stdio: 'pipe'
+          });
+
+          if (createBranchResult.status !== 0) {
+            // Branch might already exist, try to checkout
+            const checkoutResult = spawnSync('git', ['checkout', branchName], {
+              cwd: worktreePath,
+              stdio: 'pipe'
+            });
+
+            if (checkoutResult.status !== 0) {
+              throw new Error(`Failed to create/checkout branch: ${createBranchResult.stderr?.toString() || checkoutResult.stderr?.toString()}`);
+            }
+          }
+
+          // Commit changes
+          const commitMsg = `E2B execution: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}\n\nSandbox: ${sandboxId}\nExecution time: ${(executionResult.executionTime / 1000 / 60).toFixed(1)} minutes`;
+
           execSync('git add -A', { cwd: worktreePath, stdio: 'pipe' });
 
-          // Use spawnSync with argument array to prevent shell injection
-          // (safer than execSync with string interpolation)
           const commitResult = spawnSync('git', ['commit', '-m', commitMsg], {
             cwd: worktreePath,
             stdio: 'pipe'
           });
 
           if (commitResult.status !== 0) {
-            throw new Error(`Git commit failed: ${commitResult.stderr?.toString() || 'Unknown error'}`);
+            const stderr = commitResult.stderr?.toString() || '';
+            // Ignore "nothing to commit" errors
+            if (!stderr.includes('nothing to commit')) {
+              throw new Error(`Git commit failed: ${stderr}`);
+            }
           }
 
           if (!options.json) {
-            console.log(chalk.green('✓ Changes committed to worktree'));
+            console.log(chalk.green(`✓ Branch created: ${branchName}`));
+            console.log(chalk.green('✓ Changes committed'));
+            console.log(chalk.dim(`\n  Next: git push origin ${branchName}`));
           }
         } catch (error) {
           if (!options.json) {
-            console.log(chalk.yellow('⚠ No changes to commit or commit failed'));
+            console.log(chalk.yellow(`⚠ Branch creation or commit failed: ${error instanceof Error ? error.message : 'Unknown error'}`));
           }
+        }
+      } else {
+        // No --branch flag: leave changes uncommitted
+        if (!options.json) {
+          console.log(chalk.blue('\nChanges downloaded as uncommitted files'));
+          console.log(chalk.dim('  Review with: git status, git diff'));
+          console.log(chalk.dim('  Create branch: git checkout -b feature/name'));
+          console.log(chalk.dim('  Commit: git commit -m "message"'));
         }
       }
 

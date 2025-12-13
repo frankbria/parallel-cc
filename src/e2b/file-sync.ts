@@ -494,39 +494,95 @@ export async function downloadChangedFiles(
       };
     }
 
+    // Log the files we're about to download
+    logger.info(`Preparing to download ${changedFiles.length} changed files`);
+    changedFiles.slice(0, 5).forEach(f => logger.info(`  - ${f}`));
+    if (changedFiles.length > 5) {
+      logger.info(`  ... and ${changedFiles.length - 5} more`);
+    }
+
+    // Verify files exist in sandbox before creating tarball
+    logger.info('Verifying files exist in sandbox...');
+    const verifyFilesCmd = await sandbox.commands.run(
+      `cd ${remotePath} && ls -la ${changedFiles.slice(0, 3).map(f => `'${f.replace(/'/g, "'\\''")}'`).join(' ')}`,
+      { timeoutMs: 10000 }
+    );
+    logger.info(`File verification: ${verifyFilesCmd.exitCode === 0 ? 'OK' : 'FAILED'}`);
+
     // Create tarball of changed files in sandbox
     // Escape filenames properly for shell (single quotes + escape embedded quotes)
     const changedFilesList = changedFiles
       .map(f => `'${f.replace(/'/g, "'\\''")}'`)
       .join(' ');
     const tarCmd = `cd ${remotePath} && tar -czf /tmp/changed-files.tar.gz ${changedFilesList}`;
+    logger.info(`Creating tarball with ${changedFiles.length} files...`);
     const tarResult = await sandbox.commands.run(tarCmd, { timeoutMs: 2 * 60 * 1000 }); // 2 minute timeout for creating tarball
 
     // Check if tarball creation succeeded
     if (tarResult.exitCode !== 0) {
       const stderr = tarResult.stderr || 'Unknown error';
+      const stdout = tarResult.stdout || '';
+      logger.error(`Tar command failed. stdout: ${stdout.substring(0, 200)}`);
+      logger.error(`Tar command failed. stderr: ${stderr.substring(0, 200)}`);
       throw new Error(`Failed to create tarball in sandbox: ${stderr}`);
     }
 
-    // Verify tarball exists in sandbox
-    const verifyResult = await sandbox.commands.run('test -f /tmp/changed-files.tar.gz && echo "OK"', { timeoutMs: 5000 });
-    if (verifyResult.exitCode !== 0 || verifyResult.stdout?.trim() !== 'OK') {
+    // Verify tarball exists and get its size
+    const verifyResult = await sandbox.commands.run('ls -lh /tmp/changed-files.tar.gz', { timeoutMs: 5000 });
+    if (verifyResult.exitCode !== 0) {
       throw new Error('Tarball was not created in sandbox');
+    }
+    logger.info(`Tarball created in sandbox: ${verifyResult.stdout?.trim()}`);
+
+    // Verify tarball is valid gzip format in sandbox
+    const gzipCheckCmd = await sandbox.commands.run('file /tmp/changed-files.tar.gz', { timeoutMs: 5000 });
+    logger.info(`Tarball file type: ${gzipCheckCmd.stdout?.trim()}`);
+    if (!gzipCheckCmd.stdout?.includes('gzip')) {
+      throw new Error(`Tarball in sandbox is not gzip format: ${gzipCheckCmd.stdout}`);
     }
 
     // Download tarball
-    logger.debug('Downloading tarball from sandbox...');
-    const tarballContent = await Promise.race([
-      sandbox.files.read('/tmp/changed-files.tar.gz'),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Tarball download timeout after 2 minutes')), 2 * 60 * 1000)
-      )
-    ]);
+    // IMPORTANT: E2B SDK's files.read() corrupts binary data when converting to string
+    // Solution: Base64 encode in sandbox, download as string, decode locally
+    logger.info('Encoding tarball as base64 in sandbox...');
+    const base64Cmd = await sandbox.commands.run(
+      'base64 /tmp/changed-files.tar.gz',
+      { timeoutMs: 2 * 60 * 1000 }
+    );
+
+    if (base64Cmd.exitCode !== 0) {
+      throw new Error(`Failed to base64 encode tarball: ${base64Cmd.stderr}`);
+    }
+
+    const base64Content = base64Cmd.stdout.trim();
+    if (!base64Content || base64Content.length === 0) {
+      throw new Error('Base64 encoded tarball is empty');
+    }
+
+    logger.info(`Downloaded base64 string: ${formatBytes(base64Content.length)} (encoded)`);
+
+    // Decode base64 to get original binary data
+    const rawContent = Buffer.from(base64Content, 'base64');
+    logger.info(`Decoded to binary: ${formatBytes(rawContent.length)}`);
 
     // Verify we got valid content
-    if (!tarballContent || (tarballContent instanceof Buffer && tarballContent.length === 0)) {
-      throw new Error('Downloaded tarball is empty');
+    if (!rawContent || rawContent.length === 0) {
+      throw new Error('Decoded tarball is empty');
     }
+
+    // Verify gzip magic number (0x1f 0x8b)
+    logger.info(`Verifying gzip format...`);
+    const firstBytes = rawContent.slice(0, 10);
+    logger.info(`First bytes (hex): ${firstBytes.toString('hex')}`);
+
+    if (firstBytes[0] !== 0x1f || firstBytes[1] !== 0x8b) {
+      logger.error('Downloaded content is not gzip format (wrong magic number)');
+      logger.error(`Expected: 1f 8b, Got: ${firstBytes[0].toString(16)} ${firstBytes[1].toString(16)}`);
+      throw new Error('Downloaded content is not gzip format');
+    }
+    logger.info('✓ Gzip magic number verified (0x1f 0x8b)');
+
+    const tarballContent = rawContent;
 
     const localTarPath = path.join('/tmp', `changed-files-${Date.now()}.tar.gz`);
     await fs.writeFile(localTarPath, tarballContent);
@@ -536,7 +592,11 @@ export async function downloadChangedFiles(
     if (fileStats.size === 0) {
       throw new Error('Downloaded tarball file is empty');
     }
-    logger.debug(`Downloaded tarball: ${formatBytes(fileStats.size)}`);
+    logger.info(`Downloaded tarball saved: ${formatBytes(fileStats.size)}`);
+
+    // Verify file type locally
+    const localFileTypeCmd = spawnSync('file', [localTarPath], { encoding: 'utf-8' });
+    logger.info(`Local tarball file type: ${localFileTypeCmd.stdout?.trim()}`);
 
     // Extract to local worktree using spawnSync (no shell, prevents injection)
     const extractResult = spawnSync('tar', ['-xzf', localTarPath, '-C', localPath], {

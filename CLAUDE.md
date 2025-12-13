@@ -430,9 +430,25 @@ E2B integration enables autonomous Claude Code execution in isolated cloud sandb
 ### CLI Commands (E2B-Specific)
 
 ```bash
-# Execute autonomous task
+# Basic execution (results downloaded as uncommitted changes)
 parallel-cc sandbox-run --repo . --prompt "Implement feature X"
 parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+
+# Authentication methods
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method api-key  # Default
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method oauth    # Use subscription
+
+# Branch management
+parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
+parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch + commit
+parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
+
+# Combined example
+parallel-cc sandbox-run \
+  --repo . \
+  --prompt "Implement auth system" \
+  --auth-method oauth \
+  --branch auto
 
 # Monitor active sandboxes
 parallel-cc status --sandbox-only
@@ -491,6 +507,67 @@ parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
 - OAuth method requires running `/login` within Claude Code first to generate credentials
 - OAuth credentials are securely copied from ~/.claude/.credentials.json to sandbox
 - Both methods work identically once authenticated
+
+### Branch Management
+
+Control how E2B results are applied to your local worktree:
+
+**Default (No `--branch` flag): Uncommitted Changes**
+```bash
+parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --auth-method oauth
+# Results downloaded as uncommitted tracked files
+# You review, create branch, and commit manually
+```
+
+**Benefits:**
+- ✅ Full control over commit message and branch name
+- ✅ Review changes with `git status` and `git diff` before committing
+- ✅ Flexibility to stage changes selectively
+
+**Next steps:**
+```bash
+git status              # Review changes
+git diff                # See what changed
+git checkout -b fix/84  # Create your branch
+git commit -m "msg"     # Commit with your message
+git push origin fix/84  # Push when ready
+```
+
+**Auto-Generate Branch (`--branch auto`): Convenience**
+```bash
+parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch auto
+# Creates branch: e2b/fix-issue-84-2025-12-13-23-45
+# Commits with: "E2B execution: Fix issue #84..."
+```
+
+**Benefits:**
+- ✅ One-step branch creation and commit
+- ✅ Descriptive branch name from your prompt
+- ✅ Ready to push immediately
+
+**Next steps:**
+```bash
+git push origin e2b/fix-issue-84-2025-12-13-23-45  # Push the branch
+# Create PR on GitHub
+```
+
+**Specify Branch Name (`--branch <name>`): Custom Naming**
+```bash
+parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch feature/issue-84
+# Creates branch: feature/issue-84
+# Commits with: "E2B execution: Fix issue #84..."
+```
+
+**Benefits:**
+- ✅ Control over branch naming convention
+- ✅ Matches your team's branch naming patterns
+- ✅ One-step creation and commit
+
+**Branch Name Format (auto-generated):**
+- Pattern: `e2b/<slug>-<timestamp>`
+- Slug: Prompt text → kebab-case (max 50 chars)
+- Timestamp: ISO format like `2025-12-13-23-45`
+- Example: "Fix GH Issue #84" → `e2b/fix-gh-issue-84-2025-12-13-23-45`
 
 ### Requirements & Limitations
 

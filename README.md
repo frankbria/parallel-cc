@@ -327,10 +327,25 @@ git push origin HEAD:feature/my-feature
 ### E2B Commands
 
 ```bash
-# Execute autonomous task in sandbox
+# Basic execution (results downloaded as uncommitted changes)
 parallel-cc sandbox-run --repo . --prompt "Implement feature X with tests"
 parallel-cc sandbox-run --repo . --prompt-file PLAN.md
-parallel-cc sandbox-run --repo . --prompt-file .apm/Implementation_Plan.md
+
+# Authentication methods
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method api-key  # Default: uses ANTHROPIC_API_KEY
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method oauth    # Uses Claude subscription
+
+# Branch management (control how changes are applied)
+parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
+parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch + commit
+parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
+
+# Combined options
+parallel-cc sandbox-run \
+  --repo . \
+  --prompt "Implement auth system" \
+  --auth-method oauth \
+  --branch auto
 
 # Monitor active sandbox sessions
 parallel-cc status --sandbox-only
@@ -349,9 +364,11 @@ parallel-cc sandbox-run --dry-run --repo .
 ### Setup Requirements
 
 1. **E2B Account**: Sign up at https://e2b.dev (free tier available)
-2. **API Key**: Set `E2B_API_KEY` environment variable
-3. **Cost Awareness**: E2B charges ~$0.10/hour for sandbox compute time
-4. **Anthropic API Key**: Claude Code in sandbox uses your existing `ANTHROPIC_API_KEY`
+2. **E2B API Key**: Set `E2B_API_KEY` environment variable
+3. **Claude Authentication** (choose one):
+   - **API Key**: Set `ANTHROPIC_API_KEY` (pay-as-you-go)
+   - **OAuth**: Run `/login` in Claude Code (uses your Pro subscription)
+4. **Cost Awareness**: E2B charges ~$0.10/hour for sandbox compute time
 
 See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and troubleshooting.
 
