@@ -76,38 +76,36 @@ describe('Database Migration Runner', () => {
       // Migrate to v0.5.0 first
       await db.migrateToV05();
 
-      // Create a test migration for v1.0.0-test
+      // Create a test migration for v1.0.0-test in package root migrations directory
       const migrationSQL = `
         BEGIN TRANSACTION;
         UPDATE schema_metadata SET value = '1.0.0-test' WHERE key = 'version';
         COMMIT;
       `;
-      writeFileSync(path.join(testMigrationsDir, 'v1.0.0-test.sql'), migrationSQL);
 
-      // Change working directory temporarily
-      const originalCwd = process.cwd();
-      process.chdir(__dirname);
+      const projectRoot = path.resolve(__dirname, '..');
+      const migrationsDir = path.join(projectRoot, 'migrations');
+      const migrationFile = path.join(migrationsDir, 'v1.0.0-test.sql');
 
       try {
-        // Copy migration to migrations directory
-        const migrationsDir = path.join(process.cwd(), 'migrations');
-        if (!existsSync(migrationsDir)) {
-          mkdirSync(migrationsDir);
-        }
-        writeFileSync(path.join(migrationsDir, 'v1.0.0-test.sql'), migrationSQL);
+        writeFileSync(migrationFile, migrationSQL);
 
         // Run migration
         await db.runMigration('1.0.0-test');
 
-        // Verify backup was created
-        const backupPath = `${testDbPath}.v0.5.0.backup`;
+        // Verify backup was created (use absolute path)
+        const dbAbsPath = path.resolve(testDbPath);
+        const backupPath = `${dbAbsPath}.v0.5.0.backup`;
         expect(existsSync(backupPath)).toBe(true);
 
         // Clean up
-        unlinkSync(path.join(migrationsDir, 'v1.0.0-test.sql'));
-        rmSync(migrationsDir, { recursive: true, force: true });
-      } finally {
-        process.chdir(originalCwd);
+        unlinkSync(migrationFile);
+      } catch (error) {
+        // Clean up on error
+        if (existsSync(migrationFile)) {
+          unlinkSync(migrationFile);
+        }
+        throw error;
       }
     });
 
@@ -119,7 +117,7 @@ describe('Database Migration Runner', () => {
       // Migrate to v0.5.0 first
       await db.migrateToV05();
 
-      // Create a faulty migration that doesn't update version
+      // Create a faulty migration that doesn't update version in package root migrations directory
       const migrationSQL = `
         BEGIN TRANSACTION;
         -- This migration doesn't update schema_metadata.version
@@ -127,24 +125,24 @@ describe('Database Migration Runner', () => {
         COMMIT;
       `;
 
-      const originalCwd = process.cwd();
-      process.chdir(__dirname);
+      const projectRoot = path.resolve(__dirname, '..');
+      const migrationsDir = path.join(projectRoot, 'migrations');
+      const migrationFile = path.join(migrationsDir, 'v1.0.0-faulty.sql');
 
       try {
-        const migrationsDir = path.join(process.cwd(), 'migrations');
-        if (!existsSync(migrationsDir)) {
-          mkdirSync(migrationsDir);
-        }
-        writeFileSync(path.join(migrationsDir, 'v1.0.0-faulty.sql'), migrationSQL);
+        writeFileSync(migrationFile, migrationSQL);
 
         // Should throw because version wasn't updated
         await expect(db.runMigration('1.0.0-faulty')).rejects.toThrow(/Migration verification failed/);
 
         // Clean up
-        unlinkSync(path.join(migrationsDir, 'v1.0.0-faulty.sql'));
-        rmSync(migrationsDir, { recursive: true, force: true });
-      } finally {
-        process.chdir(originalCwd);
+        unlinkSync(migrationFile);
+      } catch (error) {
+        // Clean up on error
+        if (existsSync(migrationFile)) {
+          unlinkSync(migrationFile);
+        }
+        throw error;
       }
     });
   });
@@ -165,9 +163,13 @@ describe('Database Migration Runner', () => {
         is_main_repo: true
       });
 
-      // Create backup manually
-      const backupPath = `${testDbPath}.v0.5.0.backup`;
-      require('fs').copyFileSync(testDbPath, backupPath);
+      // Checkpoint WAL to ensure all changes are in main database file
+      db['db'].pragma('wal_checkpoint(TRUNCATE)');
+
+      // Create backup manually using absolute path to match rollback expectations
+      const dbAbsPath = path.resolve(testDbPath);
+      const backupPath = `${dbAbsPath}.v0.5.0.backup`;
+      require('fs').copyFileSync(dbAbsPath, backupPath);
 
       // Modify database (simulate migration)
       db['db'].prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
@@ -190,9 +192,13 @@ describe('Database Migration Runner', () => {
       // Migrate to v0.5.0
       await db.migrateToV05();
 
-      // Create backup manually
-      const backupPath = `${testDbPath}.v0.5.0.backup`;
-      require('fs').copyFileSync(testDbPath, backupPath);
+      // Checkpoint WAL to ensure all changes are in main database file
+      db['db'].pragma('wal_checkpoint(TRUNCATE)');
+
+      // Create backup manually using absolute path
+      const dbAbsPath = path.resolve(testDbPath);
+      const backupPath = `${dbAbsPath}.v0.5.0.backup`;
+      require('fs').copyFileSync(dbAbsPath, backupPath);
 
       // Rollback
       await db.rollbackMigration('0.5.0');
@@ -441,6 +447,84 @@ describe('Database Migration Runner', () => {
         });
 
         expect(session.execution_mode).toBe('e2b');
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+  });
+
+  describe('migrateToLatest', () => {
+    it('should run all necessary migrations to reach v1.0.0', async () => {
+      // Start from scratch (no migrations)
+      const currentVersion = db.getSchemaVersion();
+      expect(currentVersion).toBeNull();
+
+      const originalCwd = process.cwd();
+      const projectRoot = path.resolve(__dirname, '..');
+      process.chdir(projectRoot);
+
+      try {
+        // Run migrateToLatest
+        const result = await db.migrateToLatest();
+
+        // Should have run both 0.5.0 and 1.0.0 migrations
+        expect(result.from).toBeNull();
+        expect(result.to).toBe('1.0.0');
+        expect(result.migrations).toContain('0.5.0');
+        expect(result.migrations).toContain('1.0.0');
+
+        // Verify final version
+        const finalVersion = db.getSchemaVersion();
+        expect(finalVersion).toBe('1.0.0');
+
+        // Verify E2B columns exist
+        expect(db.hasE2BColumns()).toBe(true);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
+    it('should skip migrations if already at latest version', async () => {
+      const originalCwd = process.cwd();
+      const projectRoot = path.resolve(__dirname, '..');
+      process.chdir(projectRoot);
+
+      try {
+        // Run migrateToLatest first time
+        await db.migrateToLatest();
+
+        // Run again - should skip all migrations
+        const result = await db.migrateToLatest();
+
+        expect(result.from).toBe('1.0.0');
+        expect(result.to).toBe('1.0.0');
+        expect(result.migrations).toHaveLength(0);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+
+    it('should run only missing migrations (from v0.5.0)', async () => {
+      // Start with v0.5.0
+      await db.migrateToV05();
+
+      const originalCwd = process.cwd();
+      const projectRoot = path.resolve(__dirname, '..');
+      process.chdir(projectRoot);
+
+      try {
+        // Run migrateToLatest - should only run v1.0.0
+        const result = await db.migrateToLatest();
+
+        expect(result.from).toBe('0.5.0');
+        expect(result.to).toBe('1.0.0');
+        expect(result.migrations).toHaveLength(1);
+        expect(result.migrations).toContain('1.0.0');
+        expect(result.migrations).not.toContain('0.5.0');
+
+        // Verify final version
+        const finalVersion = db.getSchemaVersion();
+        expect(finalVersion).toBe('1.0.0');
       } finally {
         process.chdir(originalCwd);
       }
