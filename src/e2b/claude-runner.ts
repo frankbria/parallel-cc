@@ -488,6 +488,19 @@ export async function runClaudeUpdate(
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('Claude update threw exception', error);
 
+    // Try to extract stdout/stderr from error if available
+    let stdout = '';
+    let stderr = '';
+    if (error && typeof error === 'object') {
+      const errObj = error as any;
+      if (errObj.stdout) stdout = errObj.stdout;
+      if (errObj.stderr) stderr = errObj.stderr;
+
+      // Log the actual command output
+      if (stdout) logger.error(`stdout: ${stdout}`);
+      if (stderr) logger.error(`stderr: ${stderr}`);
+    }
+
     // Check for "command not found" errors (exit 127)
     if (errorMsg.includes('127') || errorMsg.toLowerCase().includes('not found')) {
       logger.error('Claude CLI missing. Use anthropic-claude-code template or check installation.');
@@ -496,7 +509,7 @@ export async function runClaudeUpdate(
     return {
       success: false,
       version: 'unknown',
-      output: '',
+      output: stdout + stderr,
       error: errorMsg
     };
   }
