@@ -265,7 +265,7 @@ export async function executeClaudeInSandbox(
 
     // Step 2: Run Claude update
     logger.info('Step 2/5: Ensuring latest Claude Code version...');
-    const updateResult = await runClaudeUpdate(sandbox, logger);
+    const updateResult = await runClaudeUpdate(sandbox, logger, opts.authMethod);
     if (!updateResult.success) {
       logger.warn(`Claude update failed, continuing anyway: ${updateResult.error}`);
       // Non-fatal: continue execution even if update fails
@@ -430,25 +430,33 @@ async function setupOAuthCredentials(
  *
  * @param sandbox - E2B Sandbox instance
  * @param logger - Logger instance
+ * @param authMethod - Authentication method ('api-key' or 'oauth')
  * @returns Update result with version info
  */
 export async function runClaudeUpdate(
   sandbox: Sandbox,
-  logger: Logger
+  logger: Logger,
+  authMethod: 'api-key' | 'oauth' = 'api-key'
 ): Promise<ClaudeUpdateResult> {
   logger.info('Running claude update...');
 
   try {
-    // Get ANTHROPIC_API_KEY from environment
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      logger.warn('ANTHROPIC_API_KEY not set - Claude may require authentication');
+    // Build update command based on auth method
+    let updateCommand: string;
+    if (authMethod === 'oauth') {
+      // OAuth mode: credentials already in sandbox, no env var needed
+      logger.debug('Using OAuth authentication for update');
+      updateCommand = 'claude update';
+    } else {
+      // API key mode: pass ANTHROPIC_API_KEY as environment variable
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        logger.warn('ANTHROPIC_API_KEY not set - Claude may require authentication');
+      }
+      updateCommand = apiKey
+        ? `ANTHROPIC_API_KEY=${apiKey} claude update`
+        : 'claude update';
     }
-
-    // Run `claude update` with API key for authentication
-    const updateCommand = apiKey
-      ? `ANTHROPIC_API_KEY=${apiKey} claude update`
-      : 'claude update';
 
     const result = await sandbox.commands.run(updateCommand, {
       timeoutMs: CLAUDE_UPDATE_TIMEOUT_MS
