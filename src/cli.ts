@@ -502,8 +502,9 @@ program
 
         // Automatically migrate database to latest version (v1.0)
         console.log(chalk.blue('\n⚙  Updating database schema...'));
+        let coordinator: Coordinator | undefined;
         try {
-          const coordinator = new Coordinator();
+          coordinator = new Coordinator();
           const db = coordinator['db'];
           const migrationResult = await db.migrateToLatest();
 
@@ -514,11 +515,14 @@ program
             console.log(chalk.dim(`  Migrations applied: v${migrationResult.migrations.join(', v')}`));
           }
           console.log(chalk.dim(`  Schema version: ${migrationResult.to}`));
-          coordinator.close();
         } catch (error) {
           console.log(chalk.yellow('⚠ Database migration failed'));
           console.log(chalk.dim(`  ${error instanceof Error ? error.message : 'Unknown error'}`));
           console.log(chalk.dim('  You can run migrations manually: parallel-cc update'));
+        } finally {
+          if (coordinator) {
+            coordinator.close();
+          }
         }
 
         if (!result.success) {
