@@ -38,8 +38,9 @@ const CLAUDE_UPDATE_TIMEOUT_MS = 2 * 60 * 1000;
 /**
  * Claude execution command template
  * Uses --dangerously-skip-permissions because we're in a sandboxed environment
+ * Includes ANTHROPIC_API_KEY for authentication
  */
-const CLAUDE_COMMAND_TEMPLATE = 'cd {workingDir} && echo "{prompt}" | claude -p --dangerously-skip-permissions';
+const CLAUDE_COMMAND_TEMPLATE = 'cd {workingDir} && ANTHROPIC_API_KEY={apiKey} echo "{prompt}" | claude -p --dangerously-skip-permissions';
 
 // ============================================================================
 // Types
@@ -339,8 +340,18 @@ export async function runClaudeUpdate(
   logger.info('Running claude update...');
 
   try {
-    // Run `claude update` with timeout
-    const result = await sandbox.commands.run('claude update', {
+    // Get ANTHROPIC_API_KEY from environment
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      logger.warn('ANTHROPIC_API_KEY not set - Claude may require authentication');
+    }
+
+    // Run `claude update` with API key for authentication
+    const updateCommand = apiKey
+      ? `ANTHROPIC_API_KEY=${apiKey} claude update`
+      : 'claude update';
+
+    const result = await sandbox.commands.run(updateCommand, {
       timeoutMs: CLAUDE_UPDATE_TIMEOUT_MS
     });
 
@@ -414,9 +425,16 @@ export async function runClaudeWithPrompt(
     const remoteLogPath = await createTempLogFile(sandbox);
     logger.debug(`Created output log: ${remoteLogPath}`);
 
-    // Build Claude command
+    // Get ANTHROPIC_API_KEY from environment
+    const apiKey = process.env.ANTHROPIC_API_KEY || '';
+    if (!apiKey) {
+      logger.warn('ANTHROPIC_API_KEY not set - Claude execution may fail with authentication error');
+    }
+
+    // Build Claude command with API key
     const command = CLAUDE_COMMAND_TEMPLATE
       .replace('{workingDir}', options.workingDir)
+      .replace('{apiKey}', apiKey)
       .replace('{prompt}', sanitizedPrompt);
 
     // Start output monitoring (if enabled)
