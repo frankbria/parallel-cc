@@ -458,16 +458,33 @@ export async function downloadChangedFiles(
   await validatePath(localPath);
 
   try {
-    // Query git status in sandbox to find changed files
+    // First, check for uncommitted changes
     const gitStatusCmd = await sandbox.commands.run('git status --porcelain', {
       cwd: remotePath,
-      timeoutMs: 30000 // 30 second timeout for git status
+      timeoutMs: 30000
     });
 
-    const changedFiles = parseGitStatus(gitStatusCmd.stdout);
-    logger.info(`Found ${changedFiles.length} changed files`);
+    let changedFiles = parseGitStatus(gitStatusCmd.stdout);
+
+    // If no uncommitted changes, get files from the most recent commit
+    // (Claude may have committed the changes)
+    if (changedFiles.length === 0) {
+      logger.info('No uncommitted changes, checking last commit...');
+      const lastCommitCmd = await sandbox.commands.run('git diff-tree --no-commit-id --name-only -r HEAD', {
+        cwd: remotePath,
+        timeoutMs: 30000
+      });
+
+      if (lastCommitCmd.exitCode === 0 && lastCommitCmd.stdout) {
+        changedFiles = lastCommitCmd.stdout.trim().split('\n').filter((f: string) => f.length > 0);
+        logger.info(`Found ${changedFiles.length} files in last commit`);
+      }
+    } else {
+      logger.info(`Found ${changedFiles.length} uncommitted changes`);
+    }
 
     if (changedFiles.length === 0) {
+      logger.warn('No changes found (neither uncommitted nor in last commit)');
       return {
         success: true,
         localPath,
@@ -483,17 +500,43 @@ export async function downloadChangedFiles(
       .map(f => `'${f.replace(/'/g, "'\\''")}'`)
       .join(' ');
     const tarCmd = `cd ${remotePath} && tar -czf /tmp/changed-files.tar.gz ${changedFilesList}`;
-    await sandbox.commands.run(tarCmd, { timeoutMs: 2 * 60 * 1000 }); // 2 minute timeout for creating tarball
+    const tarResult = await sandbox.commands.run(tarCmd, { timeoutMs: 2 * 60 * 1000 }); // 2 minute timeout for creating tarball
+
+    // Check if tarball creation succeeded
+    if (tarResult.exitCode !== 0) {
+      const stderr = tarResult.stderr || 'Unknown error';
+      throw new Error(`Failed to create tarball in sandbox: ${stderr}`);
+    }
+
+    // Verify tarball exists in sandbox
+    const verifyResult = await sandbox.commands.run('test -f /tmp/changed-files.tar.gz && echo "OK"', { timeoutMs: 5000 });
+    if (verifyResult.exitCode !== 0 || verifyResult.stdout?.trim() !== 'OK') {
+      throw new Error('Tarball was not created in sandbox');
+    }
 
     // Download tarball
+    logger.debug('Downloading tarball from sandbox...');
     const tarballContent = await Promise.race([
       sandbox.files.read('/tmp/changed-files.tar.gz'),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Tarball download timeout after 2 minutes')), 2 * 60 * 1000)
       )
     ]);
+
+    // Verify we got valid content
+    if (!tarballContent || (tarballContent instanceof Buffer && tarballContent.length === 0)) {
+      throw new Error('Downloaded tarball is empty');
+    }
+
     const localTarPath = path.join('/tmp', `changed-files-${Date.now()}.tar.gz`);
     await fs.writeFile(localTarPath, tarballContent);
+
+    // Verify downloaded file is a valid gzip file
+    const fileStats = await fs.stat(localTarPath);
+    if (fileStats.size === 0) {
+      throw new Error('Downloaded tarball file is empty');
+    }
+    logger.debug(`Downloaded tarball: ${formatBytes(fileStats.size)}`);
 
     // Extract to local worktree using spawnSync (no shell, prevents injection)
     const extractResult = spawnSync('tar', ['-xzf', localTarPath, '-C', localPath], {
