@@ -277,7 +277,12 @@ async function ensureClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boole
     const check = await sandbox.commands.run('which claude', { timeoutMs: 10000 });
     if (check.exitCode === 0) {
       logger.info('Claude Code CLI detected (pre-installed)');
+      logger.info(`Claude path: ${check.stdout.trim()}`);
       return true;
+    } else {
+      logger.info(`'which claude' returned exit code ${check.exitCode}`);
+      logger.info(`stdout: ${check.stdout}`);
+      logger.info(`stderr: ${check.stderr}`);
     }
   } catch (error) {
     logger.warn(`Failed to check for Claude CLI: ${error instanceof Error ? error.message : String(error)}`);
@@ -351,6 +356,8 @@ export async function runClaudeUpdate(
       logger.info(`Claude update succeeded: version ${version}`);
     } else {
       logger.warn(`Claude update failed: exit code ${result.exitCode}`);
+      logger.error(`stdout: ${result.stdout}`);
+      logger.error(`stderr: ${result.stderr}`);
     }
 
     return {
@@ -473,6 +480,12 @@ export async function runClaudeWithPrompt(
     }
 
     logger.info(`Claude execution ${state} (exit code: ${result.exitCode}, time: ${executionTime}ms)`);
+
+    // Log error details for failed executions
+    if (state === 'failed') {
+      logger.error(`stdout: ${result.stdout}`);
+      logger.error(`stderr: ${result.stderr}`);
+    }
 
     return {
       success: result.exitCode === 0,
