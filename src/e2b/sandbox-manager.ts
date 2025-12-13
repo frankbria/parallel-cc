@@ -21,7 +21,7 @@ import {
 const DEFAULT_CONFIG: Required<E2BSessionConfig> = {
   claudeVersion: 'latest',
   e2bSdkVersion: '1.13.2',
-  sandboxImage: 'base', // E2B base image
+  sandboxImage: process.env.E2B_TEMPLATE || 'anthropic-claude-code', // E2B template with pre-installed Claude Code
   timeoutMinutes: 60,
   warningThresholds: [30, 50]
 };

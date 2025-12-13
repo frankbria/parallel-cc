@@ -122,7 +122,7 @@ describe('SandboxManager', () => {
       await manager.createSandbox('session-123', 'custom-api-key');
 
       expect(Sandbox.create).toHaveBeenCalledWith(
-        'base',
+        'anthropic-claude-code',
         expect.objectContaining({
           apiKey: 'custom-api-key'
         })
@@ -135,7 +135,7 @@ describe('SandboxManager', () => {
       await manager.createSandbox('session-123');
 
       expect(Sandbox.create).toHaveBeenCalledWith(
-        'base',
+        'anthropic-claude-code',
         expect.objectContaining({
           apiKey: 'test-api-key-12345'
         })
@@ -156,7 +156,7 @@ describe('SandboxManager', () => {
       await manager.createSandbox('session-123');
 
       expect(Sandbox.create).toHaveBeenCalledWith(
-        'base',
+        'anthropic-claude-code',
         expect.objectContaining({
           metadata: expect.objectContaining({
             sessionId: 'session-123',
