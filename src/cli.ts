@@ -33,7 +33,9 @@ import { createTarball, uploadToSandbox, downloadChangedFiles, scanForCredential
 import { executeClaudeInSandbox } from './e2b/claude-runner.js';
 import { logger } from './logger.js';
 import * as fs from 'fs/promises';
+import { existsSync } from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { randomUUID } from 'crypto';
 import { SandboxStatus, type E2BSession, type StatusResult, type SessionInfo } from './types.js';
 
@@ -1352,6 +1354,7 @@ program
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
   .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code or E2B_TEMPLATE env var)')
+  .option('--auth-method <method>', 'Authentication method: api-key (ANTHROPIC_API_KEY env var) or oauth (Claude subscription credentials)', 'api-key')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
   .option('--no-commit', 'Skip auto-commit of results to worktree')
   .option('--json', 'Output as JSON')
@@ -1395,6 +1398,29 @@ program
       if (options.prompt && options.promptFile) {
         console.error(chalk.red('✗ Error: Cannot use both --prompt and --prompt-file'));
         process.exit(1);
+      }
+
+      // Validate authentication method
+      if (options.authMethod !== 'api-key' && options.authMethod !== 'oauth') {
+        console.error(chalk.red(`✗ Error: Invalid --auth-method "${options.authMethod}". Must be "api-key" or "oauth"`));
+        process.exit(1);
+      }
+
+      // Validate authentication credentials
+      if (options.authMethod === 'api-key') {
+        if (!process.env.ANTHROPIC_API_KEY) {
+          console.error(chalk.red('✗ Error: ANTHROPIC_API_KEY environment variable required when using --auth-method api-key'));
+          console.error(chalk.dim('  Set your API key: export ANTHROPIC_API_KEY="sk-ant-..."'));
+          process.exit(1);
+        }
+      } else if (options.authMethod === 'oauth') {
+        const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+        if (!existsSync(credPath)) {
+          console.error(chalk.red('✗ Error: OAuth credentials not found when using --auth-method oauth'));
+          console.error(chalk.dim(`  Expected location: ${credPath}`));
+          console.error(chalk.dim('  Run "claude login" to authenticate with your Claude subscription'));
+          process.exit(1);
+        }
       }
 
       // Read prompt
@@ -1543,6 +1569,22 @@ program
         return;
       }
 
+      // Read OAuth credentials if using oauth auth method
+      let oauthCredentials: string | undefined;
+      if (options.authMethod === 'oauth') {
+        const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+        try {
+          oauthCredentials = await fs.readFile(credPath, 'utf-8');
+          if (!options.json) {
+            console.log(chalk.dim('Using OAuth credentials from ~/.claude/.credentials.json'));
+          }
+        } catch (error) {
+          console.error(chalk.red(`✗ Failed to read OAuth credentials: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          await sandboxManager.terminateSandbox(sandboxId);
+          process.exit(1);
+        }
+      }
+
       if (!options.json) {
         console.log(chalk.blue('\nStep 5/6: Executing Claude Code...'));
         console.log(chalk.dim('  This may take up to 60 minutes'));
@@ -1563,7 +1605,9 @@ program
             if (!options.json) {
               process.stdout.write(chunk);
             }
-          }
+          },
+          authMethod: options.authMethod as 'api-key' | 'oauth',
+          oauthCredentials
         }
       );
 

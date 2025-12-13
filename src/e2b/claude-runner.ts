@@ -79,6 +79,19 @@ export interface ClaudeExecutionOptions {
    * Callback for real-time output chunks
    */
   onProgress?: (chunk: string) => void;
+
+  /**
+   * Authentication method: 'api-key' or 'oauth'
+   * - api-key: Uses ANTHROPIC_API_KEY environment variable
+   * - oauth: Uses Claude subscription credentials from ~/.claude/.credentials.json
+   */
+  authMethod?: 'api-key' | 'oauth';
+
+  /**
+   * OAuth credentials (required when authMethod is 'oauth')
+   * Content of ~/.claude/.credentials.json
+   */
+  oauthCredentials?: string;
 }
 
 /**
@@ -184,11 +197,14 @@ export async function executeClaudeInSandbox(
     streamOutput: options.streamOutput ?? true,
     captureFullLog: options.captureFullLog ?? true,
     localLogPath: options.localLogPath ?? '',
-    onProgress: options.onProgress ?? (() => {})
+    onProgress: options.onProgress ?? (() => {}),
+    authMethod: options.authMethod ?? 'api-key',
+    oauthCredentials: options.oauthCredentials ?? ''
   };
 
   logger.info(`Starting Claude execution in sandbox ${sandbox.sandboxId}`);
   logger.debug(`Working directory: ${opts.workingDir}, Timeout: ${opts.timeout} minutes`);
+  logger.debug(`Authentication method: ${opts.authMethod}`);
 
   try {
     // Step 1: Verify sandbox health
@@ -207,7 +223,7 @@ export async function executeClaudeInSandbox(
     logger.info('Sandbox is healthy');
 
     // Step 1.5: Ensure Claude Code is installed
-    logger.info('Step 1.5/4: Ensuring Claude Code CLI is available...');
+    logger.info('Step 1.5/5: Ensuring Claude Code CLI is available...');
     const claudeInstalled = await ensureClaudeCode(sandbox, logger);
     if (!claudeInstalled) {
       return {
@@ -220,8 +236,35 @@ export async function executeClaudeInSandbox(
       };
     }
 
+    // Step 1.75: Setup OAuth credentials if using oauth auth method
+    if (opts.authMethod === 'oauth') {
+      logger.info('Step 1.75/5: Setting up OAuth credentials...');
+      if (!opts.oauthCredentials) {
+        return {
+          success: false,
+          exitCode: -1,
+          output: '',
+          executionTime: Date.now() - startTime,
+          state: 'failed',
+          error: 'OAuth credentials required when using oauth auth method'
+        };
+      }
+
+      const oauthSetup = await setupOAuthCredentials(sandbox, logger, opts.oauthCredentials);
+      if (!oauthSetup) {
+        return {
+          success: false,
+          exitCode: -1,
+          output: '',
+          executionTime: Date.now() - startTime,
+          state: 'failed',
+          error: 'Failed to setup OAuth credentials in sandbox'
+        };
+      }
+    }
+
     // Step 2: Run Claude update
-    logger.info('Step 2/4: Ensuring latest Claude Code version...');
+    logger.info('Step 2/5: Ensuring latest Claude Code version...');
     const updateResult = await runClaudeUpdate(sandbox, logger);
     if (!updateResult.success) {
       logger.warn(`Claude update failed, continuing anyway: ${updateResult.error}`);
@@ -231,7 +274,7 @@ export async function executeClaudeInSandbox(
     }
 
     // Step 3: Execute Claude with prompt
-    logger.info('Step 3/4: Executing Claude Code...');
+    logger.info('Step 3/5: Executing Claude Code...');
     const executionResult = await runClaudeWithPrompt(
       sandbox,
       prompt,
@@ -240,7 +283,7 @@ export async function executeClaudeInSandbox(
     );
 
     // Step 4: Monitor and return results
-    logger.info('Step 4/4: Execution complete');
+    logger.info('Step 4/5: Execution complete');
     return executionResult;
 
   } catch (error) {
@@ -319,6 +362,62 @@ async function ensureClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boole
     }
   } catch (error) {
     logger.error('Claude Code installation threw exception', error);
+    return false;
+  }
+}
+
+/**
+ * Setup OAuth authentication in the sandbox
+ *
+ * Copies Claude subscription credentials to the sandbox for OAuth authentication.
+ * This allows using Claude subscription instead of API key.
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @param oauthCredentials - OAuth credentials JSON string
+ * @returns True if credentials were successfully setup
+ */
+async function setupOAuthCredentials(
+  sandbox: Sandbox,
+  logger: Logger,
+  oauthCredentials: string
+): Promise<boolean> {
+  logger.info('Setting up OAuth credentials in sandbox...');
+
+  try {
+    // Create .claude directory in sandbox home
+    const mkdirResult = await sandbox.commands.run('mkdir -p ~/.claude', { timeoutMs: 5000 });
+    if (mkdirResult.exitCode !== 0) {
+      logger.error('Failed to create .claude directory');
+      logger.error(`stderr: ${mkdirResult.stderr}`);
+      return false;
+    }
+
+    // Write credentials to file
+    // Escape single quotes in credentials JSON for shell command
+    const escapedCreds = oauthCredentials.replace(/'/g, "'\\''");
+    const writeResult = await sandbox.commands.run(
+      `echo '${escapedCreds}' > ~/.claude/.credentials.json`,
+      { timeoutMs: 5000 }
+    );
+
+    if (writeResult.exitCode !== 0) {
+      logger.error('Failed to write credentials file');
+      logger.error(`stderr: ${writeResult.stderr}`);
+      return false;
+    }
+
+    // Verify file was written
+    const verifyResult = await sandbox.commands.run('test -f ~/.claude/.credentials.json && echo "OK"', { timeoutMs: 5000 });
+    if (verifyResult.exitCode === 0 && verifyResult.stdout.trim() === 'OK') {
+      logger.info('OAuth credentials successfully setup in sandbox');
+      return true;
+    } else {
+      logger.error('Credentials file verification failed');
+      return false;
+    }
+  } catch (error) {
+    logger.error('OAuth credentials setup failed', error);
     return false;
   }
 }
@@ -425,17 +524,24 @@ export async function runClaudeWithPrompt(
     const remoteLogPath = await createTempLogFile(sandbox);
     logger.debug(`Created output log: ${remoteLogPath}`);
 
-    // Get ANTHROPIC_API_KEY from environment
-    const apiKey = process.env.ANTHROPIC_API_KEY || '';
-    if (!apiKey) {
-      logger.warn('ANTHROPIC_API_KEY not set - Claude execution may fail with authentication error');
+    // Build Claude command based on auth method
+    let command: string;
+    if (options.authMethod === 'oauth') {
+      // OAuth mode: credentials already setup in sandbox, no env var needed
+      logger.debug('Using OAuth authentication (credentials already configured)');
+      command = `cd ${options.workingDir} && echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
+    } else {
+      // API key mode: pass ANTHROPIC_API_KEY as environment variable
+      const apiKey = process.env.ANTHROPIC_API_KEY || '';
+      if (!apiKey) {
+        logger.warn('ANTHROPIC_API_KEY not set - Claude execution may fail with authentication error');
+      }
+      logger.debug('Using API key authentication');
+      command = CLAUDE_COMMAND_TEMPLATE
+        .replace('{workingDir}', options.workingDir)
+        .replace('{apiKey}', apiKey)
+        .replace('{prompt}', sanitizedPrompt);
     }
-
-    // Build Claude command with API key
-    const command = CLAUDE_COMMAND_TEMPLATE
-      .replace('{workingDir}', options.workingDir)
-      .replace('{apiKey}', apiKey)
-      .replace('{prompt}', sanitizedPrompt);
 
     // Start output monitoring (if enabled)
     let monitor: StreamMonitor | null = null;

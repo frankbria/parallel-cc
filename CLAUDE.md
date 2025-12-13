@@ -448,6 +448,46 @@ parallel-cc sandbox-kill --session-id <id>
 parallel-cc sandbox-run --dry-run --repo .
 ```
 
+### Authentication
+
+E2B sandboxes support two authentication methods for Claude CLI:
+
+**1. API Key Authentication (Default)**
+- Uses `ANTHROPIC_API_KEY` environment variable
+- Billed directly to your Anthropic API account
+- Best for: Pay-as-you-go usage, testing, or when not using Claude Pro subscription
+
+```bash
+# Set API key
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+
+# Run with API key auth (default)
+parallel-cc sandbox-run --repo . --prompt "Task" --auth-method api-key
+```
+
+**2. OAuth Authentication**
+- Uses your Claude subscription credentials
+- Requires active Claude Pro or Team subscription
+- Best for: Regular users who want to use their subscription quota
+
+```bash
+# Ensure you're logged in
+claude login
+
+# Run with OAuth auth
+parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
+```
+
+**Authentication Method Selection:**
+- `--auth-method api-key` (default): Pass ANTHROPIC_API_KEY to sandbox
+- `--auth-method oauth`: Copy ~/.claude/.credentials.json to sandbox
+
+**Important Notes:**
+- API key method requires ANTHROPIC_API_KEY env var to be set
+- OAuth method requires running `claude login` first
+- OAuth credentials are securely copied to sandbox and deleted after execution
+- Both methods work identically once authenticated
+
 ### Cost Expectations
 
 **E2B Pricing:**
