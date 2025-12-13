@@ -42,6 +42,7 @@ describe('SandboxManager', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    delete process.env.E2B_TEMPLATE;
 
     // Create mock logger
     mockLogger = createMockLogger();
@@ -69,6 +70,7 @@ describe('SandboxManager', () => {
   afterEach(() => {
     vi.clearAllTimers();
     delete process.env.E2B_API_KEY;
+    delete process.env.E2B_TEMPLATE;
   });
 
   describe('constructor', () => {
@@ -122,7 +124,7 @@ describe('SandboxManager', () => {
       await manager.createSandbox('session-123', 'custom-api-key');
 
       expect(Sandbox.create).toHaveBeenCalledWith(
-        'base',
+        'anthropic-claude-code',
         expect.objectContaining({
           apiKey: 'custom-api-key'
         })
@@ -135,7 +137,7 @@ describe('SandboxManager', () => {
       await manager.createSandbox('session-123');
 
       expect(Sandbox.create).toHaveBeenCalledWith(
-        'base',
+        'anthropic-claude-code',
         expect.objectContaining({
           apiKey: 'test-api-key-12345'
         })
@@ -156,7 +158,7 @@ describe('SandboxManager', () => {
       await manager.createSandbox('session-123');
 
       expect(Sandbox.create).toHaveBeenCalledWith(
-        'base',
+        'anthropic-claude-code',
         expect.objectContaining({
           metadata: expect.objectContaining({
             sessionId: 'session-123',

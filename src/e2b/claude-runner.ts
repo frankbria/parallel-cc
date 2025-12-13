@@ -205,6 +205,20 @@ export async function executeClaudeInSandbox(
     }
     logger.info('Sandbox is healthy');
 
+    // Step 1.5: Ensure Claude Code is installed
+    logger.info('Step 1.5/4: Ensuring Claude Code CLI is available...');
+    const claudeInstalled = await ensureClaudeCode(sandbox, logger);
+    if (!claudeInstalled) {
+      return {
+        success: false,
+        exitCode: -1,
+        output: '',
+        executionTime: Date.now() - startTime,
+        state: 'failed',
+        error: 'Claude Code CLI not available and installation failed. Use anthropic-claude-code template or check E2B configuration.'
+      };
+    }
+
     // Step 2: Run Claude update
     logger.info('Step 2/4: Ensuring latest Claude Code version...');
     const updateResult = await runClaudeUpdate(sandbox, logger);
@@ -246,6 +260,62 @@ export async function executeClaudeInSandbox(
 // ============================================================================
 // Core Execution Functions
 // ============================================================================
+
+/**
+ * Ensure Claude Code CLI is installed in the sandbox
+ *
+ * Checks if Claude Code is available, and if not, installs it via npm.
+ * This fallback supports custom/base E2B images that don't have Claude pre-installed.
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @returns True if Claude Code is available or was successfully installed
+ */
+async function ensureClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boolean> {
+  // Check if claude CLI is available
+  try {
+    const check = await sandbox.commands.run('which claude', { timeoutMs: 10000 });
+    if (check.exitCode === 0) {
+      logger.info('Claude Code CLI detected (pre-installed)');
+      return true;
+    }
+  } catch (error) {
+    logger.warn(`Failed to check for Claude CLI: ${error instanceof Error ? error.message : String(error)}`);
+    // Fall through to install attempt; if install isn't possible, we'll return false.
+  }
+
+  logger.info('Claude Code not found - installing from npm...');
+  logger.info('This may take 2-3 minutes for base/custom images');
+
+  try {
+    // Install Node.js and Claude Code CLI
+    // Includes apt-get availability check for non-Debian images
+    const install = await sandbox.commands.run(
+      [
+        // Fail fast if apt-get isn't available (non-Debian images)
+        'command -v apt-get >/dev/null 2>&1 || (echo "apt-get not available (non-Debian image)" >&2; exit 127)',
+        'DEBIAN_FRONTEND=noninteractive apt-get update -qq',
+        'DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl nodejs npm',
+        'npm install -g @anthropic-ai/claude-code',
+        // Re-verify presence on PATH
+        'which claude'
+      ].join(' && '),
+      { timeoutMs: 180000 } // 3 minutes for installation
+    );
+
+    if (install.exitCode === 0) {
+      logger.info('Claude Code CLI installed successfully');
+      return true;
+    } else {
+      logger.error(`Claude Code installation failed: exit code ${install.exitCode}`);
+      logger.error(`stderr: ${install.stderr}`);
+      return false;
+    }
+  } catch (error) {
+    logger.error('Claude Code installation threw exception', error);
+    return false;
+  }
+}
 
 /**
  * Ensure latest Claude Code version is installed
@@ -292,6 +362,11 @@ export async function runClaudeUpdate(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('Claude update threw exception', error);
+
+    // Check for "command not found" errors (exit 127)
+    if (errorMsg.includes('127') || errorMsg.toLowerCase().includes('not found')) {
+      logger.error('Claude CLI missing. Use anthropic-claude-code template or check installation.');
+    }
 
     return {
       success: false,
@@ -418,6 +493,11 @@ export async function runClaudeWithPrompt(
     // Check if error is timeout-related
     const isTimeout = errorMsg.toLowerCase().includes('timeout') ||
                      errorMsg.toLowerCase().includes('timed out');
+
+    // Check for "command not found" errors (exit 127)
+    if (errorMsg.includes('127') || errorMsg.toLowerCase().includes('not found')) {
+      logger.error('Claude CLI missing. Use anthropic-claude-code template or check installation.');
+    }
 
     return {
       success: false,

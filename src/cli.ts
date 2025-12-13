@@ -1347,16 +1347,23 @@ program
  */
 program
   .command('sandbox-run')
-  .description('Execute autonomous task in E2B sandbox with full worktree isolation (v1.0)')
+  .description('Execute autonomous task in E2B sandbox with full worktree isolation (v1.0). Uses anthropic-claude-code template by default for Claude Code support.')
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
+  .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code or E2B_TEMPLATE env var)')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
   .option('--no-commit', 'Skip auto-commit of results to worktree')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
-    const sandboxManager = new SandboxManager(logger);
+    // Precedence: CLI option > E2B_TEMPLATE env var > default 'anthropic-claude-code'
+    const sandboxImage = options.template ||
+                         (process.env.E2B_TEMPLATE?.trim() || '') ||
+                         'anthropic-claude-code';
+    const sandboxManager = new SandboxManager(logger, {
+      sandboxImage
+    });
     let sandboxId: string | null = null;
 
     try {
