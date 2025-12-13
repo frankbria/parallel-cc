@@ -471,10 +471,14 @@ parallel-cc sandbox-run --repo . --prompt "Task" --auth-method api-key
 - Best for: Regular users who want to use their subscription quota
 
 ```bash
-# Ensure you're logged in
-claude login
+# Ensure you're logged in (run this within Claude Code session)
+# Start Claude Code:
+claude
 
-# Run with OAuth auth
+# Then run /login and follow prompts
+/login
+
+# Exit Claude Code (Ctrl-D), then run with OAuth auth
 parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
 ```
 
@@ -484,8 +488,8 @@ parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
 
 **Important Notes:**
 - API key method requires ANTHROPIC_API_KEY env var to be set
-- OAuth method requires running `claude login` first
-- OAuth credentials are securely copied to sandbox and deleted after execution
+- OAuth method requires running `/login` within Claude Code first to generate credentials
+- OAuth credentials are securely copied from ~/.claude/.credentials.json to sandbox
 - Both methods work identically once authenticated
 
 ### Cost Expectations
