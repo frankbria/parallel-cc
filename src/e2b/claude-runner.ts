@@ -423,6 +423,74 @@ async function setupOAuthCredentials(
 }
 
 /**
+ * Copy mcporter configuration to sandbox
+ *
+ * Copies ~/.mcporter/mcporter.json from host to sandbox so mcporter
+ * knows about installed MCP servers and their configurations.
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @returns True if config was copied successfully
+ */
+async function copyMcporterConfig(
+  sandbox: Sandbox,
+  logger: Logger
+): Promise<boolean> {
+  logger.info('Copying mcporter configuration to sandbox...');
+
+  try {
+    // Read mcporter config from host
+    const { homedir } = await import('os');
+    const { readFile } = await import('fs/promises');
+    const { join } = await import('path');
+
+    const configPath = join(homedir(), '.mcporter', 'mcporter.json');
+
+    let configContent: string;
+    try {
+      configContent = await readFile(configPath, 'utf-8');
+      logger.debug('mcporter config found on host');
+    } catch (error) {
+      logger.debug('No mcporter config on host, skipping');
+      return true; // Not an error - user may not have mcporter configured
+    }
+
+    // Create .mcporter directory in sandbox
+    const mkdirResult = await sandbox.commands.run('mkdir -p ~/.mcporter', { timeoutMs: 5000 });
+    if (mkdirResult.exitCode !== 0) {
+      logger.error('Failed to create .mcporter directory');
+      return false;
+    }
+
+    // Write config to sandbox
+    const escapedConfig = configContent.replace(/'/g, "'\\''");
+    const writeResult = await sandbox.commands.run(
+      `echo '${escapedConfig}' > ~/.mcporter/mcporter.json`,
+      { timeoutMs: 5000 }
+    );
+
+    if (writeResult.exitCode !== 0) {
+      logger.error('Failed to write mcporter config');
+      logger.error(`stderr: ${writeResult.stderr}`);
+      return false;
+    }
+
+    // Verify file was written
+    const verifyResult = await sandbox.commands.run('test -f ~/.mcporter/mcporter.json && echo "OK"', { timeoutMs: 5000 });
+    if (verifyResult.exitCode === 0 && verifyResult.stdout.trim() === 'OK') {
+      logger.info('mcporter config successfully copied to sandbox');
+      return true;
+    } else {
+      logger.error('mcporter config verification failed');
+      return false;
+    }
+  } catch (error) {
+    logger.error('Failed to copy mcporter config', error);
+    return false;
+  }
+}
+
+/**
  * Setup additional CLI tools needed for development
  *
  * Installs MCP servers and mcporter to match local development environment.
@@ -447,6 +515,9 @@ async function setupAdditionalTools(
 
     if (mcporterInstall.exitCode === 0) {
       logger.info('mcporter installed successfully');
+
+      // Copy mcporter configuration from host if it exists
+      await copyMcporterConfig(sandbox, logger);
     } else {
       logger.warn('mcporter installation failed, continuing anyway');
       logger.debug(`stderr: ${mcporterInstall.stderr}`);
