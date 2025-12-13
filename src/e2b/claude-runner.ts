@@ -425,8 +425,7 @@ async function setupOAuthCredentials(
 /**
  * Setup additional CLI tools needed for development
  *
- * Installs common tools like GitHub CLI that Claude Code needs to interact
- * with external services.
+ * Installs MCP servers and mcporter to match local development environment.
  *
  * @param sandbox - E2B Sandbox instance
  * @param logger - Logger instance
@@ -436,41 +435,129 @@ async function setupAdditionalTools(
   sandbox: Sandbox,
   logger: Logger
 ): Promise<boolean> {
-  logger.info('Installing additional CLI tools...');
+  logger.info('Installing MCP servers and tools...');
 
   try {
-    // Install GitHub CLI (gh)
-    // Check if already installed first
-    const ghCheck = await sandbox.commands.run('which gh', { timeoutMs: 5000 });
-    if (ghCheck.exitCode === 0) {
-      logger.info('GitHub CLI already installed');
-      return true;
-    }
-
-    logger.info('Installing GitHub CLI...');
-    const installGh = await sandbox.commands.run(
-      [
-        // GitHub CLI installation for Debian/Ubuntu
-        'curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg',
-        'sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg',
-        'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null',
-        'sudo apt-get update -qq',
-        'sudo apt-get install -y gh'
-      ].join(' && '),
-      { timeoutMs: 120000 } // 2 minutes for installation
+    // Step 1: Always install mcporter for dynamic MCP server management
+    logger.info('Installing mcporter...');
+    const mcporterInstall = await sandbox.commands.run(
+      'npm install -g mcporter',
+      { timeoutMs: 60000 }
     );
 
-    if (installGh.exitCode === 0) {
-      logger.info('GitHub CLI installed successfully');
-      return true;
+    if (mcporterInstall.exitCode === 0) {
+      logger.info('mcporter installed successfully');
     } else {
-      logger.error(`GitHub CLI installation failed: exit code ${installGh.exitCode}`);
-      logger.error(`stderr: ${installGh.stderr}`);
-      return false;
+      logger.warn('mcporter installation failed, continuing anyway');
+      logger.debug(`stderr: ${mcporterInstall.stderr}`);
     }
+
+    // Step 2: Install MCP servers from settings.json files
+    const mcpServers = await discoverMCPServers(sandbox, logger);
+    if (mcpServers.length > 0) {
+      logger.info(`Found ${mcpServers.length} MCP servers to install`);
+
+      for (const serverPackage of mcpServers) {
+        logger.info(`Installing MCP server: ${serverPackage}`);
+        const install = await sandbox.commands.run(
+          `npm install -g ${serverPackage}`,
+          { timeoutMs: 90000 }
+        );
+
+        if (install.exitCode === 0) {
+          logger.info(`✓ ${serverPackage} installed`);
+        } else {
+          logger.warn(`✗ ${serverPackage} failed to install`);
+          logger.debug(`stderr: ${install.stderr}`);
+        }
+      }
+    } else {
+      logger.info('No MCP servers configured in settings.json');
+    }
+
+    return true;
   } catch (error) {
     logger.error('Additional tools setup failed', error);
     return false;
+  }
+}
+
+/**
+ * Discover MCP servers from settings.json files
+ *
+ * Reads both global (~/.claude/settings.json) and local (.claude/settings.json)
+ * to find configured MCP servers and extract their npm package names.
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @returns Array of npm package names to install
+ */
+async function discoverMCPServers(
+  sandbox: Sandbox,
+  logger: Logger
+): Promise<string[]> {
+  const packages = new Set<string>();
+
+  // Check local settings in workspace
+  const localSettingsPath = '/workspace/.claude/settings.json';
+  const localCheck = await sandbox.commands.run(
+    `test -f ${localSettingsPath} && cat ${localSettingsPath}`,
+    { timeoutMs: 5000 }
+  );
+
+  if (localCheck.exitCode === 0 && localCheck.stdout) {
+    try {
+      const settings = JSON.parse(localCheck.stdout);
+      if (settings.mcpServers) {
+        extractMCPPackages(settings.mcpServers, packages, logger);
+      }
+    } catch (error) {
+      logger.debug('Failed to parse local settings.json');
+    }
+  }
+
+  return Array.from(packages);
+}
+
+/**
+ * Extract npm package names from MCP server configurations
+ *
+ * Supports common patterns:
+ * - npx -y @org/package-name
+ * - npx @org/package-name
+ * - node /path/to/server.js (skipped - not an npm package)
+ *
+ * @param mcpServers - MCP servers configuration object
+ * @param packages - Set to add package names to
+ * @param logger - Logger instance
+ */
+function extractMCPPackages(
+  mcpServers: Record<string, any>,
+  packages: Set<string>,
+  logger: Logger
+): void {
+  for (const [serverName, config] of Object.entries(mcpServers)) {
+    if (!config || typeof config !== 'object') continue;
+
+    // Extract package from command and args
+    if (config.command === 'npx' && Array.isArray(config.args)) {
+      // Find the package name in args (skip flags like -y)
+      const packageArg = config.args.find((arg: string) =>
+        !arg.startsWith('-') && arg.includes('/')
+      );
+
+      if (packageArg) {
+        packages.add(packageArg);
+        logger.debug(`Found MCP server: ${serverName} -> ${packageArg}`);
+      }
+    } else if (config.command && config.command.includes('npx')) {
+      // Handle inline npx commands
+      const match = config.command.match(/npx\s+(?:-y\s+)?(@[\w-]+\/[\w-]+)/);
+      if (match && match[1]) {
+        packages.add(match[1]);
+        logger.debug(`Found MCP server: ${serverName} -> ${match[1]}`);
+      }
+    }
   }
 }
 

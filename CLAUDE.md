@@ -506,9 +506,22 @@ export GITHUB_TOKEN="ghp_..."  # For gh CLI authentication
 
 **Installed Tools:**
 The sandbox automatically installs:
-- GitHub CLI (`gh`) - for repository operations
+- **mcporter** - For dynamic MCP server management
+- **MCP servers** - Any servers configured in `.claude/settings.json` are installed automatically
+  - Example: `@anthropic-ai/mcp-server-github`, `@modelcontextprotocol/server-filesystem`, etc.
 - Git - for version control
 - Node.js & npm - pre-installed in anthropic-claude-code template
+
+**What Gets Copied to Sandbox:**
+Everything from your worktree except excluded patterns:
+- ✅ `CLAUDE.md` - Your project instructions
+- ✅ `.claude/skills/` - Custom skills
+- ✅ `.claude/agents/` - Custom agents
+- ✅ `.claude/commands/` - Slash commands
+- ✅ `.claude/settings.json` - Configuration (MCP servers, hooks, etc.)
+- ❌ `node_modules/` - Excluded (MCP servers installed separately)
+- ❌ `.git/` - Excluded
+- ❌ `.env` files - Excluded for security
 
 **Known Limitations:**
 1. **Interactive Questions**: When Claude asks questions for clarification, execution will pause/complete prematurely
