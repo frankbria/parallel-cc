@@ -90,10 +90,13 @@ When you open multiple Claude Code sessions in the same repository, they can ste
 ## 🚀 Installation
 
 ```bash
-# Clone and install
+# Clone and install (interactive)
 git clone https://github.com/frankbria/parallel-cc.git
 cd parallel-cc
 ./scripts/install.sh
+
+# Or non-interactive installation with all features
+./scripts/install.sh --all
 ```
 
 The install script will:
@@ -102,8 +105,15 @@ The install script will:
 3. ✅ Install CLI and wrapper scripts to `~/.local/bin`
 4. ✅ Create the database directory
 5. ✅ Verify installation with `parallel-cc doctor`
-6. ✅ **Prompt to install heartbeat hooks** (global or local)
+6. ✅ **Prompt to install heartbeat hooks** (global or local) - or install automatically with `--all`
 7. ✅ Provide shell-specific setup instructions
+
+**Non-interactive installation:**
+Use `./scripts/install.sh --all` to install everything automatically:
+- Installs heartbeat hooks globally (`~/.claude/settings.json`)
+- Configures shell alias (`claude=claude-parallel`)
+- Sets up MCP server integration
+- No prompts, ideal for automation/CI/CD
 
 ### Advanced Installation
 

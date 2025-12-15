@@ -79,6 +79,30 @@ cleanup_on_error() {
 # Set trap for cleanup on error
 trap cleanup_on_error ERR
 
+# Parse command-line arguments
+INSTALL_ALL=false
+for arg in "$@"; do
+    case "$arg" in
+        --all)
+            INSTALL_ALL=true
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --all        Install non-interactively with all features (global hooks + alias)"
+            echo "  --help, -h   Show this help message"
+            echo ""
+            exit 0
+            ;;
+        *)
+            print error "Unknown option: $arg"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 print title "Installing parallel-cc"
 
 # Detect if this is an update
@@ -285,6 +309,36 @@ else
     print check "Installation verified"
 fi
 echo ""
+
+# Check if non-interactive mode with --all flag
+if [ "$INSTALL_ALL" = true ]; then
+    print step "Running non-interactive installation with --all flag..."
+    echo ""
+
+    if "$CLI_TARGET" install --all > /tmp/parallel-cc-install-all.log 2>&1; then
+        print check "All features installed successfully"
+        print step "  • Heartbeat hooks installed globally"
+        print step "  • Shell alias configured"
+        print step "  • MCP server configured"
+        echo ""
+        print warning "Restart your shell or source your shell profile to use the 'claude' alias"
+
+        # Show installation status
+        print step "Installation status:"
+        "$CLI_TARGET" install --status
+    else
+        print error "Installation failed. Check /tmp/parallel-cc-install-all.log for details"
+        cat /tmp/parallel-cc-install-all.log
+        exit 1
+    fi
+
+    echo ""
+    print title "Installation Complete!"
+    print step "Run 'parallel-cc --help' to get started"
+    print step "Or just run 'claude' (after restarting your shell)"
+    echo ""
+    exit 0
+fi
 
 # Interactive hook setup
 install_hooks() {
