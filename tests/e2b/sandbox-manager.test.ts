@@ -106,6 +106,34 @@ describe('SandboxManager', () => {
     });
   });
 
+  describe('validateApiKey (static)', () => {
+    it('should not throw when API key is in environment', () => {
+      process.env.E2B_API_KEY = 'test-key';
+      expect(() => SandboxManager.validateApiKey()).not.toThrow();
+    });
+
+    it('should not throw when API key is passed as parameter', () => {
+      delete process.env.E2B_API_KEY;
+      expect(() => SandboxManager.validateApiKey('custom-key')).not.toThrow();
+    });
+
+    it('should throw when API key is missing from environment', () => {
+      delete process.env.E2B_API_KEY;
+      expect(() => SandboxManager.validateApiKey()).toThrow(/E2B API key not found/);
+    });
+
+    it('should prefer parameter over environment variable', () => {
+      process.env.E2B_API_KEY = 'env-key';
+      // Should not throw even if parameter is provided
+      expect(() => SandboxManager.validateApiKey('param-key')).not.toThrow();
+    });
+
+    it('should throw with helpful error message', () => {
+      delete process.env.E2B_API_KEY;
+      expect(() => SandboxManager.validateApiKey()).toThrow(/Set E2B_API_KEY environment variable/);
+    });
+  });
+
   describe('createSandbox', () => {
     it('should create sandbox successfully with session ID', async () => {
       const result = await manager.createSandbox('session-123');

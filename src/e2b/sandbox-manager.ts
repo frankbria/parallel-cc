@@ -104,6 +104,21 @@ export class SandboxManager {
   }
 
   /**
+   * Validate E2B API key is present
+   *
+   * @param apiKey - Optional API key to validate
+   * @throws Error if API key is not found
+   */
+  static validateApiKey(apiKey?: string): void {
+    const e2bApiKey = apiKey || process.env.E2B_API_KEY;
+    if (!e2bApiKey) {
+      throw new Error(
+        'E2B API key not found. Set E2B_API_KEY environment variable or pass apiKey parameter.'
+      );
+    }
+  }
+
+  /**
    * Create a new E2B sandbox
    *
    * @param sessionId - Unique session identifier
@@ -118,12 +133,8 @@ export class SandboxManager {
       this.logger.info(`Creating E2B sandbox for session ${sessionId}`);
 
       // Validate API key (required for E2B)
+      SandboxManager.validateApiKey(apiKey);
       const e2bApiKey = apiKey || process.env.E2B_API_KEY;
-      if (!e2bApiKey) {
-        throw new Error(
-          'E2B API key not found. Set E2B_API_KEY environment variable or pass apiKey parameter.'
-        );
-      }
 
       // Create sandbox using E2B SDK
       // E2B SDK signature: Sandbox.create(template, opts)
