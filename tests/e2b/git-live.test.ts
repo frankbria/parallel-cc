@@ -13,6 +13,8 @@ import {
   generateBranchName,
   generatePRBody,
   pushToRemoteAndCreatePR,
+  isValidBranchName,
+  sanitizeBranchName,
   type GitLiveOptions
 } from '../../src/e2b/git-live.js';
 import type { Logger } from '../../src/logger.js';
@@ -59,6 +61,66 @@ describe('generateBranchName', () => {
     await new Promise(resolve => setTimeout(resolve, 2));
     const result2 = generateBranchName('Same prompt');
     expect(result1).not.toBe(result2);
+  });
+});
+
+describe('isValidBranchName', () => {
+  it('should accept valid branch names with alphanumeric and safe characters', () => {
+    expect(isValidBranchName('feature/my-branch')).toBe(true);
+    expect(isValidBranchName('fix-bug-123')).toBe(true);
+    expect(isValidBranchName('main')).toBe(true);
+    expect(isValidBranchName('e2b/test-feature-123456')).toBe(true);
+    expect(isValidBranchName('user_branch')).toBe(true);
+  });
+
+  it('should reject branch names with shell metacharacters', () => {
+    expect(isValidBranchName('branch; rm -rf /')).toBe(false);
+    expect(isValidBranchName('branch`whoami`')).toBe(false);
+    expect(isValidBranchName('branch$(whoami)')).toBe(false);
+    expect(isValidBranchName('branch${VAR}')).toBe(false);
+    expect(isValidBranchName('branch|ls')).toBe(false);
+    expect(isValidBranchName('branch&echo')).toBe(false);
+  });
+
+  it('should reject branch names with spaces', () => {
+    expect(isValidBranchName('my branch')).toBe(false);
+    expect(isValidBranchName(' leading-space')).toBe(false);
+    expect(isValidBranchName('trailing-space ')).toBe(false);
+  });
+
+  it('should reject empty or whitespace-only strings', () => {
+    expect(isValidBranchName('')).toBe(false);
+    expect(isValidBranchName('   ')).toBe(false);
+  });
+
+  it('should reject branch names with special characters', () => {
+    expect(isValidBranchName('branch@name')).toBe(false);
+    expect(isValidBranchName('branch#tag')).toBe(false);
+    expect(isValidBranchName('branch*wildcard')).toBe(false);
+    expect(isValidBranchName('branch!exclaim')).toBe(false);
+  });
+});
+
+describe('sanitizeBranchName', () => {
+  it('should remove unsafe characters from branch name', () => {
+    // Semicolon and spaces are removed, leaving: branch, rm, -rf, /
+    expect(sanitizeBranchName('branch; rm -rf /', 'fallback')).toBe('branchrm-rf/');
+    expect(sanitizeBranchName('my branch name', 'fallback')).toBe('mybranchname');
+    expect(sanitizeBranchName('test@branch#name', 'fallback')).toBe('testbranchname');
+  });
+
+  it('should preserve safe characters', () => {
+    expect(sanitizeBranchName('feature/fix-bug_123', 'fallback')).toBe('feature/fix-bug_123');
+  });
+
+  it('should fall back to generated name if sanitization results in empty string', () => {
+    const result = sanitizeBranchName('!!!@@@###', 'My Fallback');
+    expect(result).toMatch(/^e2b\/my-fallback-\d+$/);
+  });
+
+  it('should fall back to generated name for whitespace-only input', () => {
+    const result = sanitizeBranchName('   ', 'Safe Prompt');
+    expect(result).toMatch(/^e2b\/safe-prompt-\d+$/);
   });
 });
 
@@ -313,5 +375,62 @@ describe('pushToRemoteAndCreatePR', () => {
     const ghCall = mockSandbox.commands.run.mock.calls[6];
     expect(ghCall[0]).toContain('GITHUB_TOKEN=ghp_test_token_123');
     expect(ghCall[0]).toContain('gh pr create');
+  });
+
+  it('should sanitize unsafe custom branch names to prevent shell injection', async () => {
+    mockSandbox.commands.run
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' }); // gh pr create
+
+    const optionsWithUnsafeBranch = {
+      ...mockOptions,
+      featureBranch: 'branch; rm -rf /'
+    };
+    const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithUnsafeBranch);
+
+    // Check that logger warned about sanitization
+    expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Invalid branch name'));
+    expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('unsafe characters'));
+
+    // Check that sanitized branch name was used (no shell metacharacters)
+    const checkoutCall = mockSandbox.commands.run.mock.calls[0];
+    expect(checkoutCall[0]).toContain('git checkout -b');
+    expect(checkoutCall[0]).not.toContain(';');
+    expect(checkoutCall[0]).not.toContain('rm -rf');
+
+    // Verify the result uses sanitized name
+    expect(result.branchName).toBe('branchrm-rf/');
+  });
+
+  it('should use valid custom branch names without sanitization', async () => {
+    mockSandbox.commands.run
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' }); // gh pr create
+
+    const optionsWithSafeBranch = {
+      ...mockOptions,
+      featureBranch: 'feature/safe-branch-123'
+    };
+    const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithSafeBranch);
+
+    // Check that no warning was logged
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+
+    // Check that original branch name was used
+    const checkoutCall = mockSandbox.commands.run.mock.calls[0];
+    expect(checkoutCall[0]).toContain('git checkout -b feature/safe-branch-123');
+
+    // Verify the result uses original name
+    expect(result.branchName).toBe('feature/safe-branch-123');
   });
 });

@@ -35,6 +35,49 @@ export interface GitLiveResult {
 }
 
 /**
+ * Validate and sanitize branch name to prevent shell injection
+ *
+ * Git branch names should only contain: a-z, A-Z, 0-9, -, /, _
+ * This prevents shell metacharacters from being interpreted
+ *
+ * @param branchName - Branch name to validate
+ * @returns true if valid, false otherwise
+ */
+export function isValidBranchName(branchName: string): boolean {
+  // Allow only alphanumeric, hyphen, slash, and underscore
+  // Reject if contains spaces or is empty
+  const validPattern = /^[a-zA-Z0-9/_-]+$/;
+  const trimmed = branchName.trim();
+
+  // Reject if empty, has leading/trailing spaces, or contains invalid characters
+  return (
+    trimmed.length > 0 &&
+    branchName === trimmed &&
+    validPattern.test(trimmed)
+  );
+}
+
+/**
+ * Sanitize branch name by removing invalid characters
+ * Falls back to generated name if sanitization results in empty string
+ *
+ * @param branchName - Branch name to sanitize
+ * @param fallbackPrompt - Prompt to use for fallback generation
+ * @returns Sanitized safe branch name
+ */
+export function sanitizeBranchName(branchName: string, fallbackPrompt: string): string {
+  // Remove any characters that aren't alphanumeric, hyphen, slash, or underscore
+  const sanitized = branchName.replace(/[^a-zA-Z0-9/_-]/g, '').trim();
+
+  // If sanitization results in empty string, fall back to generated name
+  if (sanitized.length === 0) {
+    return generateBranchName(fallbackPrompt);
+  }
+
+  return sanitized;
+}
+
+/**
  * Generate feature branch name from prompt
  *
  * @param prompt - User's execution prompt
@@ -118,10 +161,20 @@ export async function pushToRemoteAndCreatePR(
     logger.info('Starting git live push and PR creation');
 
     // 1. Generate branch name if not provided
-    const branchName = options.featureBranch || generateBranchName(options.prompt);
+    let branchName = options.featureBranch || generateBranchName(options.prompt);
+
+    // 2. Sanitize branch name to prevent shell injection
+    if (options.featureBranch) {
+      // If user provided a custom branch name, validate and sanitize it
+      if (!isValidBranchName(branchName)) {
+        logger.warn(`Invalid branch name "${branchName}" contains unsafe characters. Sanitizing...`);
+        branchName = sanitizeBranchName(branchName, options.prompt);
+        logger.info(`Sanitized to: ${branchName}`);
+      }
+    }
     logger.info(`Using branch name: ${branchName}`);
 
-    // 2. Create and checkout feature branch
+    // 3. Create and checkout feature branch
     logger.info('Creating feature branch in sandbox');
     const checkoutResult = await sandbox.commands.run(`git checkout -b ${branchName}`, {
       cwd: '/workspace',
@@ -132,7 +185,7 @@ export async function pushToRemoteAndCreatePR(
       throw new Error(`Failed to create branch: exit code ${checkoutResult.exitCode}`);
     }
 
-    // 3. Stage all changes
+    // 4. Stage all changes
     logger.info('Staging changes');
     const addResult = await sandbox.commands.run('git add .', {
       cwd: '/workspace',
@@ -143,7 +196,7 @@ export async function pushToRemoteAndCreatePR(
       throw new Error(`Failed to stage changes: exit code ${addResult.exitCode}`);
     }
 
-    // 4. Commit with descriptive message
+    // 5. Commit with descriptive message
     logger.info('Creating commit');
     const commitMessage = `E2B execution: ${options.prompt}
 
@@ -191,7 +244,7 @@ Sandbox: ${options.sandboxId}`;
       });
     }
 
-    // 5. Push to remote
+    // 6. Push to remote
     logger.info('Pushing to remote');
     const pushResult = await sandbox.commands.run(`git push -u origin ${branchName}`, {
       cwd: '/workspace',
@@ -202,7 +255,7 @@ Sandbox: ${options.sandboxId}`;
       throw new Error(`Failed to push to remote: exit code ${pushResult.exitCode}`);
     }
 
-    // 6. Create PR using gh CLI
+    // 7. Create PR using gh CLI
     logger.info('Creating pull request');
     const prTitle = `E2B: ${options.prompt}`;
     const prBody = generatePRBody(options);
@@ -223,7 +276,7 @@ Sandbox: ${options.sandboxId}`;
       throw new Error(`Failed to create PR: exit code ${ghResult.exitCode}`);
     }
 
-    // 7. Parse PR URL from output
+    // 8. Parse PR URL from output
     // gh pr create outputs the PR URL as the last line
     const prUrl = ghResult.stdout?.trim().split('\n').pop() || undefined;
 
