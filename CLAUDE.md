@@ -569,6 +569,93 @@ parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch feature/issue
 - Timestamp: ISO format like `2025-12-13-23-45`
 - Example: "Fix GH Issue #84" → `e2b/fix-gh-issue-84-2025-12-13-23-45`
 
+### Git Live Mode (Optional)
+
+**Overview:**
+Git Live Mode (`--git-live`) pushes results directly to a remote feature branch and creates a pull request, bypassing the local download workflow. This is ideal for autonomous workflows where you want results ready for review immediately.
+
+**Default (Download) vs Git Live:**
+
+| Aspect | Download Mode (Default) | Git Live Mode (`--git-live`) |
+|--------|------------------------|------------------------------|
+| **Where changes land** | Local worktree | Remote feature branch |
+| **Manual steps** | Review → branch → commit → push → PR | None (automatic) |
+| **Control** | Full control over commits | Automatic commit message |
+| **Review timing** | Before commit | After PR created |
+| **Best for** | Interactive workflows | Autonomous "walk away" tasks |
+| **Parallel sessions** | Safe (isolated worktrees) | Warning (potential PR conflicts) |
+
+**Git Live Usage:**
+
+```bash
+# Basic git-live: Push and create PR automatically
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-live
+
+# With custom target branch (default: main)
+parallel-cc sandbox-run --repo . --prompt "Add feature" --git-live --target-branch develop
+
+# With custom branch name
+parallel-cc sandbox-run --repo . --prompt "Fix #42" --git-live --branch feature/issue-42
+
+# Full example
+parallel-cc sandbox-run \
+  --repo . \
+  --prompt "Implement auth system" \
+  --auth-method oauth \
+  --git-live \
+  --target-branch main
+```
+
+**What Happens:**
+1. Execution completes in E2B sandbox
+2. Changes committed in sandbox with descriptive message
+3. Feature branch pushed to remote (auto-generated or custom name)
+4. Pull request created using `gh` CLI
+5. PR URL returned immediately
+
+**Requirements:**
+- `GITHUB_TOKEN` environment variable must be set
+- Token needs repo access (push, PR creation)
+- Get token at: https://github.com/settings/tokens
+
+**Parallel Session Warning:**
+When `--git-live` is used with multiple parallel sessions active, you'll see:
+
+```
+⚠ Warning: Parallel sessions detected with --git-live mode
+  3 sessions are currently active in this repository
+  Multiple PRs may create conflicts or duplicate work
+  Consider using download mode (default) for better control
+
+Continue with --git-live mode despite parallel sessions? (y/n):
+```
+
+You can choose to:
+- **Continue** (`y`): Proceed with git-live, accepting potential PR conflicts
+- **Switch** (`n`): Automatically fall back to download mode
+
+**When to Use Git Live:**
+- ✅ Single autonomous task with clear scope
+- ✅ No other parallel sessions active
+- ✅ Want immediate PR for review
+- ✅ Trust the execution quality
+- ✅ "Walk away and review later" workflow
+
+**When to Use Download Mode:**
+- ✅ Multiple parallel sessions (default behavior)
+- ✅ Want to review changes before committing
+- ✅ Need to stage changes selectively
+- ✅ Interactive development workflow
+- ✅ Uncertain about execution quality
+
+**Example PR Created:**
+
+The PR will include:
+- **Title:** `E2B: [your prompt]`
+- **Body:** Execution details, session ID, sandbox ID, execution time
+- **Checklist:** Review todos for security, tests, changes
+- **Branch:** Auto-generated (`e2b/[slug]-[timestamp]`) or custom
+
 ### Requirements & Limitations
 
 **Environment Variables:**
