@@ -1442,6 +1442,25 @@ Examples:
         }
       }
 
+      // Validate E2B API key early (fail fast before resource-intensive operations)
+      try {
+        SandboxManager.validateApiKey();
+      } catch (error) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'E2B API key validation failed',
+            hint: 'Set E2B_API_KEY environment variable. Get your key from https://e2b.dev/dashboard'
+          }));
+        } else {
+          console.error(chalk.red(`✗ ${error instanceof Error ? error.message : 'E2B API key validation failed'}`));
+          console.error(chalk.dim('  Get your E2B API key from: https://e2b.dev/dashboard'));
+          console.error(chalk.yellow('  Set it with: export E2B_API_KEY="your-key-here"'));
+          console.error(chalk.dim('  Add to your shell profile (.bashrc, .zshrc) for persistence'));
+        }
+        process.exit(1);
+      }
+
       // Read prompt
       let prompt: string;
       if (options.promptFile) {
@@ -1898,6 +1917,23 @@ program
     const sandboxManager = new SandboxManager(logger);
 
     try {
+      // Validate E2B API key early
+      try {
+        SandboxManager.validateApiKey();
+      } catch (error) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'E2B API key validation failed',
+            hint: 'Set E2B_API_KEY environment variable. Get your key from https://e2b.dev/dashboard'
+          }));
+        } else {
+          console.error(chalk.red(`✗ ${error instanceof Error ? error.message : 'E2B API key validation failed'}`));
+          console.error(chalk.dim('  Get your E2B API key from: https://e2b.dev/dashboard'));
+        }
+        process.exit(1);
+      }
+
       const db = coordinator['db'];
       const sessionId = options.sessionId;
 
