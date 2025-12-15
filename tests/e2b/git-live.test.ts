@@ -140,7 +140,9 @@ describe('pushToRemoteAndCreatePR', () => {
     mockSandbox.commands.run
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit -F
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // rm temp file
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
       .mockResolvedValueOnce({
         exitCode: 0,
@@ -158,11 +160,13 @@ describe('pushToRemoteAndCreatePR', () => {
 
   it('should use provided feature branch name if given', async () => {
     mockSandbox.commands.run
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/42\n', stderr: '' });
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit -F
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // rm temp file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/42\n', stderr: '' }); // gh pr create
 
     const optionsWithBranch = { ...mockOptions, featureBranch: 'custom-branch' };
     const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithBranch);
@@ -191,11 +195,26 @@ describe('pushToRemoteAndCreatePR', () => {
     expect(result.error).toContain('Failed to stage changes');
   });
 
+  it('should handle commit message file write failure', async () => {
+    mockSandbox.commands.run
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout ok
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add ok
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'write failed' }) // write commit msg file fails
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // cleanup (in finally block)
+
+    const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, mockOptions);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to write commit message file');
+  });
+
   it('should handle commit failure', async () => {
     mockSandbox.commands.run
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout ok
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add ok
-      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'commit failed' }); // commit fails
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file ok
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'commit failed' }) // commit fails
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // cleanup (in finally block)
 
     const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, mockOptions);
 
@@ -207,7 +226,9 @@ describe('pushToRemoteAndCreatePR', () => {
     mockSandbox.commands.run
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout ok
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add ok
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file ok
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit ok
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup ok
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'push failed' }); // push fails
 
     const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, mockOptions);
@@ -220,7 +241,9 @@ describe('pushToRemoteAndCreatePR', () => {
     mockSandbox.commands.run
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout ok
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add ok
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file ok
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit ok
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup ok
       .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push ok
       .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'gh failed' }); // gh pr create fails
 
@@ -232,11 +255,13 @@ describe('pushToRemoteAndCreatePR', () => {
 
   it('should log progress messages', async () => {
     mockSandbox.commands.run
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' });
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' }); // gh pr create
 
     await pushToRemoteAndCreatePR(mockSandbox, mockLogger, mockOptions);
 
@@ -249,34 +274,43 @@ describe('pushToRemoteAndCreatePR', () => {
     expect(mockLogger.info).toHaveBeenCalledWith('Creating pull request');
   });
 
-  it('should escape quotes in commit message', async () => {
+  it('should handle special characters in commit message safely', async () => {
     mockSandbox.commands.run
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' });
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' }); // gh pr create
 
-    const optionsWithQuotes = { ...mockOptions, prompt: 'Fix "authentication" bug' };
-    await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithQuotes);
+    const optionsWithSpecialChars = { ...mockOptions, prompt: 'Fix "auth" bug with $VAR and `backticks`' };
+    await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithSpecialChars);
 
-    // Check that commit command was called with escaped quotes
-    const commitCall = mockSandbox.commands.run.mock.calls[2];
-    expect(commitCall[0]).toContain('\\"authentication\\"');
+    // Check that commit uses -F flag with temp file (safe from injection)
+    const commitCall = mockSandbox.commands.run.mock.calls[3];
+    expect(commitCall[0]).toContain('git commit -F');
+    expect(commitCall[0]).toContain('.git-commit-msg-');
+
+    // Check that message is base64 encoded in write command
+    const writeCall = mockSandbox.commands.run.mock.calls[2];
+    expect(writeCall[0]).toContain('base64 -d');
   });
 
   it('should pass GITHUB_TOKEN to gh pr create command', async () => {
     mockSandbox.commands.run
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' });
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' }); // gh pr create
 
     await pushToRemoteAndCreatePR(mockSandbox, mockLogger, mockOptions);
 
     // Check that gh pr create command includes GITHUB_TOKEN
-    const ghCall = mockSandbox.commands.run.mock.calls[4];
+    const ghCall = mockSandbox.commands.run.mock.calls[6];
     expect(ghCall[0]).toContain('GITHUB_TOKEN=ghp_test_token_123');
     expect(ghCall[0]).toContain('gh pr create');
   });

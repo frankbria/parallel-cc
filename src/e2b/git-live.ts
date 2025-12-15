@@ -152,13 +152,43 @@ Autonomous execution completed in ${(options.executionTime / 1000).toFixed(1)}s
 Session: ${options.sessionId}
 Sandbox: ${options.sandboxId}`;
 
-    const commitResult = await sandbox.commands.run(`git commit -m "${commitMessage.replace(/"/g, '\\"')}"`, {
-      cwd: '/workspace',
-      timeoutMs: 10000
-    });
+    // Use temporary file to avoid shell injection in commit message
+    const tempCommitFile = `/workspace/.git-commit-msg-${Date.now()}.tmp`;
 
-    if (commitResult.exitCode !== 0) {
-      throw new Error(`Failed to commit: exit code ${commitResult.exitCode}`);
+    try {
+      // Write commit message to temporary file using printf for safety
+      // Base64 encode the message to avoid any shell interpretation
+      const messageBase64 = Buffer.from(commitMessage, 'utf-8').toString('base64');
+      const writeResult = await sandbox.commands.run(
+        `printf '%s' "${messageBase64}" | base64 -d > "${tempCommitFile}"`,
+        {
+          cwd: '/workspace',
+          timeoutMs: 5000
+        }
+      );
+
+      if (writeResult.exitCode !== 0) {
+        throw new Error(`Failed to write commit message file: exit code ${writeResult.exitCode}`);
+      }
+
+      // Commit using the file
+      const commitResult = await sandbox.commands.run(`git commit -F "${tempCommitFile}"`, {
+        cwd: '/workspace',
+        timeoutMs: 10000
+      });
+
+      if (commitResult.exitCode !== 0) {
+        throw new Error(`Failed to commit: exit code ${commitResult.exitCode}`);
+      }
+    } finally {
+      // Clean up temporary file
+      await sandbox.commands.run(`rm -f "${tempCommitFile}"`, {
+        cwd: '/workspace',
+        timeoutMs: 5000
+      }).catch(() => {
+        // Log but don't fail on cleanup errors
+        logger.warn(`Failed to clean up temporary commit message file: ${tempCommitFile}`);
+      });
     }
 
     // 5. Push to remote
