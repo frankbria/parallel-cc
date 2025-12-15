@@ -24,6 +24,8 @@
 - [How Sessions Work](#-how-sessions-work)
 - [Configuration](#️-configuration)
 - [Merging Work from Worktrees](#-merging-work-from-worktrees)
+- [E2B Sandbox Integration](#-e2b-sandbox-integration)
+- [What's New](#-whats-new)
 - [Roadmap](#️-roadmap)
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
@@ -53,6 +55,9 @@
 - 🔄 **Cross-process reconnection** - Access sandboxes created in separate CLI invocations
 - 🎮 **Full CLI control** - Run, monitor, download, and kill sandbox sessions
 - 💰 **Cost tracking** - Automatic warnings at 30min and 50min usage marks
+- 🌿 **Branch management** - Auto-generate branches, custom naming, or uncommitted changes
+- 🚀 **Git Live mode** - Push directly to remote and create PRs automatically
+- 🔑 **Dual authentication** - Support for both API key and OAuth methods
 
 ## The Problem
 
@@ -267,6 +272,11 @@ parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto           
 parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch name
 parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
 
+# Git Live mode - Push and create PR automatically
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-live
+parallel-cc sandbox-run --repo . --prompt "Add feature" --git-live --target-branch develop
+parallel-cc sandbox-run --repo . --prompt "Fix #42" --git-live --branch feature/issue-42
+
 # Monitoring & control
 parallel-cc sandbox-logs --session-id <id>       # View sandbox logs
 parallel-cc sandbox-logs --session-id <id> --follow  # Stream logs in real-time
@@ -354,6 +364,116 @@ git push origin HEAD:feature/my-feature
 - **Cost-Effective**: ~$0.10/hour for E2B compute time
 - **Git Integration**: Results automatically committed in worktrees for easy review
 
+### Branch Management Modes
+
+**1. Uncommitted Changes (Default)**
+```bash
+parallel-cc sandbox-run --repo . --prompt "Fix issue #84"
+# Results downloaded as uncommitted tracked files
+# Full control: review with git status/diff, then commit manually
+```
+
+**Benefits:**
+- ✅ Full control over commit message and branch name
+- ✅ Review changes before committing
+- ✅ Stage changes selectively
+
+**2. Auto-Generated Branch**
+```bash
+parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch auto
+# Creates: e2b/fix-issue-84-2025-12-13-23-45
+# Auto-commits with descriptive message
+```
+
+**Benefits:**
+- ✅ One-step branch creation and commit
+- ✅ Descriptive branch name from prompt
+- ✅ Ready to push immediately
+
+**3. Custom Branch Name**
+```bash
+parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch feature/issue-84
+# Creates specified branch and commits
+```
+
+**Benefits:**
+- ✅ Control over branch naming convention
+- ✅ Matches team's branch patterns
+- ✅ One-step creation and commit
+
+### Git Live Mode (NEW!)
+
+**What is Git Live Mode?**
+
+Git Live Mode (`--git-live`) pushes results directly to a remote feature branch and creates a pull request automatically, bypassing the local download workflow. Perfect for autonomous "walk away" tasks.
+
+**Quick Example:**
+```bash
+# Basic git-live: Push and create PR automatically
+parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-live
+
+# With custom target branch (default: main)
+parallel-cc sandbox-run --repo . --prompt "Add feature" --git-live --target-branch develop
+
+# Full example with all options
+parallel-cc sandbox-run \
+  --repo . \
+  --prompt "Implement auth system" \
+  --auth-method oauth \
+  --git-live \
+  --target-branch main \
+  --branch feature/auth-system
+```
+
+**What Happens:**
+1. Execution completes in E2B sandbox
+2. Changes committed in sandbox with descriptive message
+3. Feature branch pushed to remote (auto-generated or custom name)
+4. Pull request created using `gh` CLI
+5. PR URL returned immediately
+
+**Requirements:**
+- `GITHUB_TOKEN` environment variable must be set
+- Token needs repo access (push, PR creation)
+- Get token at: https://github.com/settings/tokens
+
+**Parallel Session Warning:**
+
+When `--git-live` is used with multiple parallel sessions active, you'll see a warning prompt. You can choose to:
+- **Continue** (`y`): Proceed with git-live, accepting potential PR conflicts
+- **Switch** (`n`): Automatically fall back to download mode
+
+**When to Use Git Live:**
+- ✅ Single autonomous task with clear scope
+- ✅ No other parallel sessions active
+- ✅ Want immediate PR for review
+- ✅ Trust the execution quality
+- ✅ "Walk away and review later" workflow
+
+**When to Use Download Mode (Default):**
+- ✅ Multiple parallel sessions
+- ✅ Want to review changes before committing
+- ✅ Need to stage changes selectively
+- ✅ Interactive development workflow
+
+### Authentication Methods
+
+**1. API Key Authentication (Default)**
+```bash
+export ANTHROPIC_API_KEY="sk-ant-api03-..."
+parallel-cc sandbox-run --repo . --prompt "Task" --auth-method api-key
+```
+
+**2. OAuth Authentication**
+```bash
+# First, login within Claude Code session
+claude
+/login  # Follow prompts
+
+# Then use OAuth mode
+parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
+```
+
 ### Usage Examples
 
 ```bash
@@ -363,15 +483,21 @@ parallel-cc sandbox-run --repo . --prompt "Implement feature X with tests"
 # Execute from plan file
 parallel-cc sandbox-run --repo . --prompt-file PLAN.md
 
-# Full example with branch and OAuth auth
+# Full example with OAuth and auto branch
 parallel-cc sandbox-run \
   --repo . \
   --prompt "Implement auth system" \
   --auth-method oauth \
   --branch auto
-```
 
-For complete E2B command reference, see the [CLI Commands](#-cli-commands) section above.
+# Git Live mode with custom branch
+parallel-cc sandbox-run \
+  --repo . \
+  --prompt "Fix issue #123" \
+  --git-live \
+  --branch feature/issue-123 \
+  --target-branch develop
+```
 
 ### Setup Requirements
 
@@ -380,9 +506,55 @@ For complete E2B command reference, see the [CLI Commands](#-cli-commands) secti
 3. **Claude Authentication** (choose one):
    - **API Key**: Set `ANTHROPIC_API_KEY` (pay-as-you-go)
    - **OAuth**: Run `/login` in Claude Code (uses your Pro subscription)
-4. **Cost Awareness**: E2B charges ~$0.10/hour for sandbox compute time
+4. **GitHub Token** (for git-live mode): Set `GITHUB_TOKEN` environment variable
+5. **Cost Awareness**: E2B charges ~$0.10/hour for sandbox compute time
 
 See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and troubleshooting.
+
+## 🎉 What's New
+
+### v1.0.0 - Git Live Mode & Enhanced Branch Management (December 2024)
+
+**New Features:**
+- 🚀 **Git Live Mode** - Autonomous PR creation directly from E2B sandboxes
+  - Push results to remote branches automatically
+  - Create pull requests with `gh` CLI integration
+  - Parallel session detection and warnings
+  - Configurable target branches
+
+- 🌿 **Enhanced Branch Management**
+  - `--branch auto` - Auto-generate descriptive branch names from prompts
+  - `--branch <name>` - Custom branch naming
+  - Default mode: Uncommitted changes for full control
+  - Smart branch name slugification (max 50 chars, kebab-case)
+
+- 🔧 **Installation Improvements**
+  - `./scripts/install.sh --all` - Non-interactive installation
+  - Automatic setup of hooks, alias, and MCP server
+  - Ideal for automation and CI/CD pipelines
+
+**Security Enhancements:**
+- Shell injection prevention in git commit messages
+- Branch name validation and sanitization
+- Target branch validation
+- Input validation for all E2B commands
+
+**Bug Fixes:**
+- Fixed GITHUB_TOKEN passing to gh CLI in sandboxes
+- Improved error handling in OAuth authentication
+- Better file sync reliability for E2B downloads
+- Migration system improvements with automatic updates
+
+### v1.0.0 - E2B Sandbox Integration (December 2024)
+
+**Major Features:**
+- ☁️ E2B cloud sandbox execution for autonomous development
+- 🔑 Dual authentication support (API key and OAuth)
+- 📦 Intelligent file sync with compression
+- 💰 Cost tracking and warnings
+- 🔒 Enhanced security with shell injection prevention
+
+See [ROADMAP.md](./ROADMAP.md) for detailed version history and future plans.
 
 ## 🗺️ Roadmap
 
@@ -398,6 +570,8 @@ See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and
 - ✅ E2B sandbox integration for autonomous execution
 - ✅ Plan-driven workflows with real-time monitoring
 - ✅ Intelligent file sync and cost tracking
+- ✅ Git Live mode for autonomous PR creation
+- ✅ Enhanced branch management with auto-generation
 
 ### What's Next
 
@@ -445,6 +619,22 @@ parallel-cc doctor
 ```
 
 This checks dependencies (gtr, git, jq), database location, configuration, and MCP server status.
+
+### E2B Sandbox Issues
+
+**"E2B API key not found"**
+```bash
+export E2B_API_KEY="your-key-here"
+```
+
+**"Claude authentication failed"**
+- For API key mode: Set `ANTHROPIC_API_KEY`
+- For OAuth mode: Run `/login` in Claude Code first
+
+**"Git Live mode - GITHUB_TOKEN required"**
+```bash
+export GITHUB_TOKEN="ghp_..."  # Get from https://github.com/settings/tokens
+```
 
 ## 🤝 Contributing
 
