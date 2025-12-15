@@ -1725,7 +1725,8 @@ Examples:
           prompt,
           executionTime: executionResult.executionTime,
           sessionId,
-          sandboxId
+          sandboxId,
+          githubToken: process.env.GITHUB_TOKEN!
         });
 
         if (!gitLiveResult.success) {

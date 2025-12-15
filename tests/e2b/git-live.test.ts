@@ -69,7 +69,8 @@ describe('generatePRBody', () => {
     prompt: 'Implement feature X',
     executionTime: 123456,
     sessionId: 'test-session-123',
-    sandboxId: 'sandbox-abc'
+    sandboxId: 'sandbox-abc',
+    githubToken: 'ghp_test_token_123'
   };
 
   it('should include prompt in PR body', () => {
@@ -130,7 +131,8 @@ describe('pushToRemoteAndCreatePR', () => {
     prompt: 'Test feature',
     executionTime: 60000,
     sessionId: 'test-session',
-    sandboxId: 'test-sandbox'
+    sandboxId: 'test-sandbox',
+    githubToken: 'ghp_test_token_123'
   };
 
   it('should successfully create branch and PR', async () => {
@@ -261,5 +263,21 @@ describe('pushToRemoteAndCreatePR', () => {
     // Check that commit command was called with escaped quotes
     const commitCall = mockSandbox.commands.run.mock.calls[2];
     expect(commitCall[0]).toContain('\\"authentication\\"');
+  });
+
+  it('should pass GITHUB_TOKEN to gh pr create command', async () => {
+    mockSandbox.commands.run
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' });
+
+    await pushToRemoteAndCreatePR(mockSandbox, mockLogger, mockOptions);
+
+    // Check that gh pr create command includes GITHUB_TOKEN
+    const ghCall = mockSandbox.commands.run.mock.calls[4];
+    expect(ghCall[0]).toContain('GITHUB_TOKEN=ghp_test_token_123');
+    expect(ghCall[0]).toContain('gh pr create');
   });
 });

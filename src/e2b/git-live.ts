@@ -20,6 +20,7 @@ export interface GitLiveOptions {
   executionTime: number;
   sessionId: string;
   sandboxId: string;
+  githubToken: string;
 }
 
 /**
@@ -181,7 +182,7 @@ Sandbox: ${options.sandboxId}`;
     const escapedBody = prBody.replace(/'/g, "'\\''");
 
     const ghResult = await sandbox.commands.run(
-      `gh pr create --title '${escapedTitle}' --body '${escapedBody}' --base ${options.targetBranch}`,
+      `GITHUB_TOKEN=${options.githubToken} gh pr create --title '${escapedTitle}' --body '${escapedBody}' --base ${options.targetBranch}`,
       {
         cwd: '/workspace',
         timeoutMs: 30000
