@@ -31,6 +31,7 @@ import { startMcpServer } from './mcp/index.js';
 import { SandboxManager } from './e2b/sandbox-manager.js';
 import { createTarball, uploadToSandbox, downloadChangedFiles, scanForCredentials } from './e2b/file-sync.js';
 import { executeClaudeInSandbox } from './e2b/claude-runner.js';
+import { pushToRemoteAndCreatePR } from './e2b/git-live.js';
 import { logger } from './logger.js';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -47,7 +48,7 @@ program
 /**
  * Helper to prompt user for input (for interactive mode)
  */
-function prompt(question: string): Promise<string> {
+function promptUser(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -552,13 +553,13 @@ program
       console.log(chalk.bold('\nInteractive Installation\n'));
 
       // Prompt for hooks
-      const hooksAnswer = await prompt('Install heartbeat hooks? [y/N]: ');
+      const hooksAnswer = await promptUser('Install heartbeat hooks? [y/N]: ');
       const wantHooks = hooksAnswer === 'y' || hooksAnswer === 'yes';
 
       let hooksGlobal = false;
       let hooksLocal = false;
       if (wantHooks) {
-        const locationAnswer = await prompt('  Install globally or locally? [global/local]: ');
+        const locationAnswer = await promptUser('  Install globally or locally? [global/local]: ');
         if (locationAnswer === 'global' || locationAnswer === 'g') {
           hooksGlobal = true;
         } else if (locationAnswer === 'local' || locationAnswer === 'l') {
@@ -567,7 +568,7 @@ program
       }
 
       // Prompt for alias
-      const aliasAnswer = await prompt('Add claude=claude-parallel alias? [y/N]: ');
+      const aliasAnswer = await promptUser('Add claude=claude-parallel alias? [y/N]: ');
       const wantAlias = aliasAnswer === 'y' || aliasAnswer === 'yes';
 
       // Execute installations
@@ -746,7 +747,7 @@ program
         console.log('The heartbeat hook improves session tracking by updating');
         console.log('timestamps each time Claude Code uses a tool.\n');
 
-        const answer = await prompt('Install globally or locally? [global/local/skip]: ');
+        const answer = await promptUser('Install globally or locally? [global/local/skip]: ');
 
         if (answer === 'global' || answer === 'g') {
           installGlobal = true;
@@ -1376,6 +1377,8 @@ Examples:
   .option('--auth-method <method>', 'Authentication method: api-key (ANTHROPIC_API_KEY env var) or oauth (Claude subscription credentials)', 'api-key')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
   .option('--branch <name>', 'Create feature branch for changes: "auto" (auto-generate name) or specify branch name. Default: no branch, uncommitted changes')
+  .option('--git-live', 'Push results to remote feature branch and create PR instead of downloading (requires GITHUB_TOKEN)')
+  .option('--target-branch <branch>', 'Target branch for PR when using --git-live (default: main)', 'main')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1438,6 +1441,24 @@ Examples:
           console.error(chalk.red('✗ Error: OAuth credentials not found when using --auth-method oauth'));
           console.error(chalk.dim(`  Expected location: ${credPath}`));
           console.error(chalk.dim('  Run "claude login" to authenticate with your Claude subscription'));
+          process.exit(1);
+        }
+      }
+
+      // Validate GitHub token for git-live mode
+      if (options.gitLive) {
+        if (!process.env.GITHUB_TOKEN) {
+          if (options.json) {
+            console.log(JSON.stringify({
+              success: false,
+              error: 'GITHUB_TOKEN environment variable required for --git-live mode',
+              hint: 'Set your token: export GITHUB_TOKEN="ghp_..."'
+            }));
+          } else {
+            console.error(chalk.red('✗ Error: GITHUB_TOKEN environment variable required for --git-live mode'));
+            console.error(chalk.dim('  Set your GitHub token: export GITHUB_TOKEN="ghp_..."'));
+            console.error(chalk.dim('  Create a token at: https://github.com/settings/tokens'));
+          }
           process.exit(1);
         }
       }
@@ -1506,6 +1527,27 @@ Examples:
         } else {
           console.log(chalk.green(`✓ Created worktree: ${registerResult.worktreeName}`));
           console.log(chalk.dim(`  Path: ${worktreePath}`));
+        }
+      }
+
+      // Warn about parallel sessions when using --git-live mode
+      if (options.gitLive && registerResult.parallelSessions > 1) {
+        if (!options.json) {
+          console.log('');
+          console.log(chalk.yellow('⚠ Warning: Parallel sessions detected with --git-live mode'));
+          console.log(chalk.yellow(`  ${registerResult.parallelSessions} sessions are currently active in this repository`));
+          console.log(chalk.dim('  Multiple PRs may create conflicts or duplicate work'));
+          console.log(chalk.dim('  Consider using download mode (default) for better control'));
+          console.log('');
+
+          // Prompt user to continue
+          const answer = await promptUser('Continue with --git-live mode despite parallel sessions? (y/n): ');
+          if (answer !== 'y' && answer !== 'yes') {
+            console.log(chalk.yellow('✓ Switching to download mode'));
+            options.gitLive = false;
+          } else {
+            console.log(chalk.green('✓ Continuing with --git-live mode'));
+          }
         }
       }
 
@@ -1666,26 +1708,61 @@ Examples:
         console.log(chalk.green(`\n✓ Execution completed: ${(executionResult.executionTime / 1000 / 60).toFixed(1)} minutes`));
       }
 
-      // Step 6: Download results
-      if (!options.json) {
-        console.log(chalk.blue('\nStep 6/6: Downloading results...'));
+      // Step 6: Git Live or Download results
+      let gitLiveResult;
+      let downloadResult;
+
+      if (options.gitLive) {
+        // Git Live Mode: Push to remote and create PR
+        if (!options.json) {
+          console.log(chalk.blue('\nStep 6/6: Pushing to remote and creating PR...'));
+        }
+
+        gitLiveResult = await pushToRemoteAndCreatePR(sandbox, logger, {
+          repoPath,
+          targetBranch: options.targetBranch,
+          featureBranch: options.branch,
+          prompt,
+          executionTime: executionResult.executionTime,
+          sessionId,
+          sandboxId
+        });
+
+        if (!gitLiveResult.success) {
+          console.error(chalk.red(`✗ Git live failed: ${gitLiveResult.error}`));
+          await sandboxManager.terminateSandbox(sandboxId);
+          process.exit(1);
+        }
+
+        if (!options.json) {
+          console.log(chalk.green(`✓ Feature branch created: ${gitLiveResult.branchName}`));
+          if (gitLiveResult.prUrl) {
+            console.log(chalk.green(`✓ Pull request created: ${gitLiveResult.prUrl}`));
+          }
+        }
+
+      } else {
+        // Default Download Mode
+        if (!options.json) {
+          console.log(chalk.blue('\nStep 6/6: Downloading results...'));
+        }
+
+        downloadResult = await downloadChangedFiles(sandbox, '/workspace', worktreePath);
+
+        if (!downloadResult.success) {
+          console.error(chalk.red(`✗ Download failed: ${downloadResult.error}`));
+          await sandboxManager.terminateSandbox(sandboxId);
+          process.exit(1);
+        }
+
+        if (!options.json) {
+          console.log(chalk.green(`✓ Results downloaded: ${downloadResult.filesDownloaded} files`));
+          console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
+        }
       }
 
-      const downloadResult = await downloadChangedFiles(sandbox, '/workspace', worktreePath);
-
-      if (!downloadResult.success) {
-        console.error(chalk.red(`✗ Download failed: ${downloadResult.error}`));
-        await sandboxManager.terminateSandbox(sandboxId);
-        process.exit(1);
-      }
-
-      if (!options.json) {
-        console.log(chalk.green(`✓ Results downloaded: ${downloadResult.filesDownloaded} files`));
-        console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
-      }
-
-      // Create branch and commit if requested
-      if (options.branch) {
+      // Create branch and commit if requested (download mode only)
+      if (!options.gitLive && options.branch) {
         if (!options.json) {
           console.log(chalk.blue('\nCreating feature branch...'));
         }
@@ -1776,17 +1853,37 @@ Examples:
       if (!options.json) {
         console.log(chalk.bold.green('\n✅ Sandbox execution complete!\n'));
         console.log(chalk.dim(`Session ID: ${sessionId}`));
-        console.log(chalk.dim(`Worktree: ${worktreePath}`));
+
+        if (options.gitLive && gitLiveResult) {
+          console.log(chalk.dim(`Branch: ${gitLiveResult.branchName}`));
+          console.log(chalk.dim(`Target: ${gitLiveResult.targetBranch}`));
+          if (gitLiveResult.prUrl) {
+            console.log(chalk.green(`\nPull Request: ${gitLiveResult.prUrl}`));
+          }
+        } else {
+          console.log(chalk.dim(`Worktree: ${worktreePath}`));
+        }
       } else {
-        console.log(JSON.stringify({
+        const output: any = {
           success: true,
           sessionId,
           sandboxId,
-          worktreePath,
           executionTime: executionResult.executionTime,
-          filesDownloaded: downloadResult.filesDownloaded,
           exitCode: executionResult.exitCode
-        }, null, 2));
+        };
+
+        if (options.gitLive && gitLiveResult) {
+          output.gitLive = {
+            branchName: gitLiveResult.branchName,
+            prUrl: gitLiveResult.prUrl,
+            targetBranch: gitLiveResult.targetBranch
+          };
+        } else if (downloadResult) {
+          output.worktreePath = worktreePath;
+          output.filesDownloaded = downloadResult.filesDownloaded;
+        }
+
+        console.log(JSON.stringify(output, null, 2));
       }
 
       } finally {
