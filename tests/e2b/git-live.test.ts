@@ -15,6 +15,7 @@ import {
   pushToRemoteAndCreatePR,
   isValidBranchName,
   sanitizeBranchName,
+  validateTargetBranch,
   type GitLiveOptions
 } from '../../src/e2b/git-live.js';
 import type { Logger } from '../../src/logger.js';
@@ -121,6 +122,48 @@ describe('sanitizeBranchName', () => {
   it('should fall back to generated name for whitespace-only input', () => {
     const result = sanitizeBranchName('   ', 'Safe Prompt');
     expect(result).toMatch(/^e2b\/safe-prompt-\d+$/);
+  });
+});
+
+describe('validateTargetBranch', () => {
+  it('should accept valid target branch names', () => {
+    expect(() => validateTargetBranch('main')).not.toThrow();
+    expect(() => validateTargetBranch('develop')).not.toThrow();
+    expect(() => validateTargetBranch('master')).not.toThrow();
+    expect(() => validateTargetBranch('release/v1.0')).not.toThrow();
+    expect(() => validateTargetBranch('feature/branch-name')).not.toThrow();
+    expect(() => validateTargetBranch('hotfix_patch')).not.toThrow();
+    expect(() => validateTargetBranch('release-1.0.0')).not.toThrow();
+  });
+
+  it('should reject target branches with shell metacharacters', () => {
+    expect(() => validateTargetBranch('main; rm -rf /')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('branch`whoami`')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('branch$(whoami)')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('branch|ls')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('branch&echo')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('branch$VAR')).toThrow('Invalid target branch name');
+  });
+
+  it('should reject target branches with spaces', () => {
+    expect(() => validateTargetBranch('my branch')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch(' main')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('main ')).toThrow('Invalid target branch name');
+  });
+
+  it('should reject empty target branch', () => {
+    expect(() => validateTargetBranch('')).toThrow('Invalid target branch name');
+    expect(() => validateTargetBranch('   ')).toThrow('Invalid target branch name');
+  });
+
+  it('should include helpful error message about allowed characters', () => {
+    try {
+      validateTargetBranch('main; rm -rf /');
+      expect.fail('Should have thrown an error');
+    } catch (error) {
+      expect((error as Error).message).toContain('letters, numbers, hyphen, slash, underscore, and dot');
+      expect((error as Error).message).toContain('shell metacharacters');
+    }
   });
 });
 
@@ -432,5 +475,47 @@ describe('pushToRemoteAndCreatePR', () => {
 
     // Verify the result uses original name
     expect(result.branchName).toBe('feature/safe-branch-123');
+  });
+
+  it('should reject invalid target branch names to prevent shell injection', async () => {
+    const optionsWithUnsafeTarget = {
+      ...mockOptions,
+      targetBranch: 'main; rm -rf /'
+    };
+
+    const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithUnsafeTarget);
+
+    // Should fail without making any sandbox calls
+    expect(mockSandbox.commands.run).not.toHaveBeenCalled();
+
+    // Should return failure result
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid target branch name');
+    expect(result.error).toContain('shell metacharacters');
+  });
+
+  it('should accept valid target branch names', async () => {
+    mockSandbox.commands.run
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // checkout
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // add
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // write commit msg file
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // commit
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // cleanup
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // push
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'https://github.com/user/repo/pull/1\n', stderr: '' }); // gh pr create
+
+    const optionsWithValidTarget = {
+      ...mockOptions,
+      targetBranch: 'release/v1.0.0'
+    };
+    const result = await pushToRemoteAndCreatePR(mockSandbox, mockLogger, optionsWithValidTarget);
+
+    // Should succeed
+    expect(result.success).toBe(true);
+    expect(result.targetBranch).toBe('release/v1.0.0');
+
+    // Check that gh pr create used the correct target branch
+    const ghCall = mockSandbox.commands.run.mock.calls[6];
+    expect(ghCall[0]).toContain('--base release/v1.0.0');
   });
 });
