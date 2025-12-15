@@ -90,7 +90,7 @@ for arg in "$@"; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --all        Install non-interactively with all features (global hooks + alias)"
+            echo "  --all        Install non-interactively with all features (global hooks, alias, and MCP server)"
             echo "  --help, -h   Show this help message"
             echo ""
             exit 0
