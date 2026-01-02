@@ -432,18 +432,8 @@ describe('E2E Workflow Tests (v1.0)', () => {
       expect(executionResult).toBeTruthy();
       // Execution may complete or fail depending on mock, just verify it returns
 
-      // PHASE 5: Teardown - Terminate sandbox
-      console.log('  Phase 5: Teardown (terminate sandbox)');
-      const terminationResult = await sandboxManager.terminateSandbox(sandboxResult.sandboxId);
-      expect(terminationResult.success).toBe(true);
-      expect(terminationResult.cleanedUp).toBe(true);
-
-      // Verify sandbox is no longer tracked
-      const sandboxAfterTermination = sandboxManager.getSandbox(sandboxResult.sandboxId);
-      expect(sandboxAfterTermination).toBeNull();
-
-      // PHASE 6: File Retrieval - Download changed files
-      console.log('  Phase 6: File Retrieval (download changes)');
+      // PHASE 5: File Retrieval - Download changed files (while sandbox is still active)
+      console.log('  Phase 5: File Retrieval (download changes)');
       // Note: Download will fail because we can't create real tarball in mock
       // But we verify the function handles this gracefully
       const downloadResult = await downloadChangedFiles(
@@ -452,6 +442,16 @@ describe('E2E Workflow Tests (v1.0)', () => {
         TEST_REPO_PATH
       );
       expect(downloadResult).toBeTruthy();
+
+      // PHASE 6: Teardown - Terminate sandbox (after file retrieval)
+      console.log('  Phase 6: Teardown (terminate sandbox)');
+      const terminationResult = await sandboxManager.terminateSandbox(sandboxResult.sandboxId);
+      expect(terminationResult.success).toBe(true);
+      expect(terminationResult.cleanedUp).toBe(true);
+
+      // Verify sandbox is no longer tracked
+      const sandboxAfterTermination = sandboxManager.getSandbox(sandboxResult.sandboxId);
+      expect(sandboxAfterTermination).toBeNull();
 
       // PHASE 7: Seamless Continuation - Verify worktree is ready for user review
       console.log('  Phase 7: Seamless Continuation (verify state)');
