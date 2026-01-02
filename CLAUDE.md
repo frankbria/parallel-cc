@@ -175,7 +175,7 @@ npm test -- --coverage  # Run tests with coverage report
 **Framework:** Vitest 2.1.x with v8 coverage
 
 **Current Status:**
-- 303 tests, 100% passing
+- 311 tests (303 unit/integration + 8 E2E), 100% passing
 - Key file coverage:
   - merge-detector.ts: 87%+ coverage
   - db.ts: 83%+ coverage
@@ -185,9 +185,51 @@ npm test -- --coverage  # Run tests with coverage report
 
 **Running Tests:**
 ```bash
-npm test              # Watch mode
-npm test -- --run     # Single run
+npm test              # Watch mode (all tests)
+npm test -- --run     # Single run (all tests)
 npm test -- --coverage  # With coverage report
+
+# E2E tests only
+npm test tests/e2b/e2e-workflow.test.ts -- --run
+```
+
+### E2E Workflow Tests (v1.0)
+
+Comprehensive end-to-end tests validating the complete E2B sandboxing workflow from kickoff through seamless continuation.
+
+**Test Coverage:**
+1. **Standard Workflow**: Kickoff → Upload → Execute → Download → Continue
+2. **Git-Live Workflow**: Kickoff → Upload → Execute → Push → PR
+3. **Timeout Enforcement**: Soft warnings (30min, 50min) + hard termination (60min)
+4. **Error Recovery**: Network failures, sandbox failures, upload/download errors
+5. **Continuation**: Seamless local continuation after file retrieval
+6. **Concurrent Sessions**: Multiple E2B sessions with proper isolation
+
+**Architecture Tested:**
+- **Coordinator**: Session + worktree management
+- **SandboxManager**: E2B lifecycle management
+- **ClaudeRunner**: Autonomous Claude execution
+- **FileSync**: Upload/download operations
+- **GitLive**: Push to remote + PR creation
+
+**Characteristics:**
+- **Duration**: ~2-3s per test, ~15-20s total suite
+- **Mocking Strategy**: E2B SDK fully mocked (no API calls), real filesystem/database/git operations
+- **Prerequisites**: None! No E2B_API_KEY required, no internet connection needed
+- **Test File**: `tests/e2b/e2e-workflow.test.ts`
+
+**Running E2E Tests:**
+```bash
+# Run all E2E tests
+npm test tests/e2b/e2e-workflow.test.ts -- --run
+
+# Run specific E2E test suite
+npm test -- -t "Standard Workflow"
+npm test -- -t "Git-Live Workflow"
+npm test -- -t "Timeout Enforcement"
+
+# Run with coverage
+npm test tests/e2b/e2e-workflow.test.ts -- --run --coverage
 ```
 
 ## Testing Locally
