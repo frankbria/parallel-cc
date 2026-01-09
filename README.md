@@ -1,5 +1,6 @@
 # parallel-cc
 
+[![Follow on X](https://img.shields.io/twitter/follow/FrankBria18044?style=social)](https://x.com/FrankBria18044)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
