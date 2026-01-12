@@ -236,6 +236,13 @@ export async function executeClaudeInSandbox(
       };
     }
 
+    // Step 1.6: Update Claude Code to latest version
+    logger.info('Step 1.6/5: Updating Claude Code to latest version...');
+    const claudeUpdated = await updateClaudeCode(sandbox, logger);
+    if (!claudeUpdated) {
+      logger.warn('Claude Code update failed - proceeding with installed version');
+    }
+
     // Step 1.75: Setup OAuth credentials if using oauth auth method
     if (opts.authMethod === 'oauth') {
       logger.info('Step 1.75/5: Setting up OAuth credentials...');
@@ -276,9 +283,6 @@ export async function executeClaudeInSandbox(
     if (!toolsSetup) {
       logger.warn('Some tools failed to install, continuing anyway');
     }
-
-    // Note: Skipping claude update because global npm installations can't update
-    // without sudo. The anthropic-claude-code template comes with a recent version.
 
     // Step 3: Execute Claude with prompt
     logger.info('Step 3/5: Executing Claude Code...');
@@ -369,6 +373,109 @@ async function ensureClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boole
     }
   } catch (error) {
     logger.error('Claude Code installation threw exception', error);
+    return false;
+  }
+}
+
+/**
+ * Update Claude Code to the latest version
+ *
+ * Tries multiple strategies to update Claude Code:
+ * 1. Use `claude update` command (preferred)
+ * 2. Use npm with --prefix to local directory
+ * 3. Fall back to existing version
+ *
+ * @param sandbox - E2B Sandbox instance
+ * @param logger - Logger instance
+ * @returns True if update succeeded or wasn't needed
+ */
+async function updateClaudeCode(sandbox: Sandbox, logger: Logger): Promise<boolean> {
+  logger.info('Updating Claude Code to latest version...');
+
+  try {
+    // First, check the current version
+    const versionCheck = await sandbox.commands.run('claude --version', { timeoutMs: 10000 });
+    const currentVersion = versionCheck.exitCode === 0 ? versionCheck.stdout.trim() : 'unknown';
+    logger.info(`Current Claude version: ${currentVersion}`);
+
+    // Strategy 1: Try using the built-in claude update command
+    // This may work better than npm global install in the sandbox
+    logger.debug('Trying claude update command...');
+    try {
+      const claudeUpdate = await sandbox.commands.run(
+        'claude update --yes 2>&1 || claude update 2>&1',
+        { timeoutMs: 120000 }
+      );
+
+      if (claudeUpdate.exitCode === 0) {
+        const newVersion = await sandbox.commands.run('claude --version', { timeoutMs: 10000 });
+        logger.info(`Claude Code updated successfully: ${newVersion.stdout.trim()}`);
+        return true;
+      }
+      logger.debug(`claude update failed: ${claudeUpdate.stdout} ${claudeUpdate.stderr}`);
+    } catch (e) {
+      logger.debug(`claude update threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // Strategy 2: Try npm install with --prefix to /tmp (works without global perms)
+    logger.debug('Trying npm install with local prefix...');
+    try {
+      const npmLocal = await sandbox.commands.run(
+        'npm install --prefix /tmp/claude-update @anthropic-ai/claude-code@latest && ln -sf /tmp/claude-update/node_modules/.bin/claude /usr/local/bin/claude-new',
+        { timeoutMs: 180000 }
+      );
+
+      if (npmLocal.exitCode === 0) {
+        // Test the new claude
+        const testNew = await sandbox.commands.run('/usr/local/bin/claude-new --version', { timeoutMs: 10000 });
+        if (testNew.exitCode === 0) {
+          // Replace the old claude symlink
+          await sandbox.commands.run('mv /usr/local/bin/claude-new /usr/local/bin/claude || cp /usr/local/bin/claude-new /usr/bin/claude', { timeoutMs: 5000 });
+          logger.info(`Claude Code updated via local prefix: ${testNew.stdout.trim()}`);
+          return true;
+        }
+      }
+      logger.debug(`npm local prefix failed: ${npmLocal.stdout} ${npmLocal.stderr}`);
+    } catch (e) {
+      logger.debug(`npm local prefix threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // Strategy 3: Try npx to run the latest version directly (updates PATH)
+    logger.debug('Trying npx approach...');
+    try {
+      // Create a wrapper script that uses npx
+      const createWrapper = await sandbox.commands.run(
+        `cat > /tmp/claude-wrapper.sh << 'EOFSCRIPT'
+#!/bin/bash
+exec npx -y @anthropic-ai/claude-code@latest "$@"
+EOFSCRIPT
+chmod +x /tmp/claude-wrapper.sh`,
+        { timeoutMs: 10000 }
+      );
+
+      if (createWrapper.exitCode === 0) {
+        // Test if npx can fetch and run latest
+        const testNpx = await sandbox.commands.run(
+          'npx -y @anthropic-ai/claude-code@latest --version',
+          { timeoutMs: 120000 }
+        );
+
+        if (testNpx.exitCode === 0) {
+          // Replace claude with the wrapper
+          await sandbox.commands.run('cp /tmp/claude-wrapper.sh /usr/local/bin/claude && chmod +x /usr/local/bin/claude', { timeoutMs: 5000 });
+          logger.info(`Claude Code will use npx latest: ${testNpx.stdout.trim()}`);
+          return true;
+        }
+      }
+    } catch (e) {
+      logger.debug(`npx approach threw: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // All strategies failed
+    logger.warn(`All Claude update strategies failed. Using installed version: ${currentVersion}`);
+    return false;
+  } catch (error) {
+    logger.error('Claude Code update threw unexpected exception', error);
     return false;
   }
 }
@@ -886,25 +993,15 @@ export async function runClaudeWithPrompt(
     const remoteLogPath = await createTempLogFile(sandbox);
     logger.debug(`Created output log: ${remoteLogPath}`);
 
-    // Build environment variables string for the command
-    const envVars: string[] = [];
-
-    // Add GITHUB_TOKEN if available (for gh CLI operations)
-    const githubToken = process.env.GITHUB_TOKEN;
-    if (githubToken) {
-      envVars.push(`GITHUB_TOKEN=${githubToken}`);
-      logger.debug('GITHUB_TOKEN will be passed to sandbox');
-    } else {
-      logger.debug('GITHUB_TOKEN not set - GitHub operations may require authentication');
-    }
-
     // Build Claude command based on auth method
+    // Note: We use 'export' instead of inline env vars because inline vars only apply
+    // to the first command in a pipeline, not to commands after the pipe (|)
     let command: string;
+    const exportStatements: string[] = [];
+
     if (options.authMethod === 'oauth') {
       // OAuth mode: credentials already setup in sandbox, no env var needed for Claude
       logger.debug('Using OAuth authentication (credentials already configured)');
-      const envPrefix = envVars.length > 0 ? envVars.join(' ') + ' ' : '';
-      command = `cd ${options.workingDir} && ${envPrefix}echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
     } else {
       // API key mode: pass ANTHROPIC_API_KEY as environment variable
       const apiKey = process.env.ANTHROPIC_API_KEY || '';
@@ -912,10 +1009,21 @@ export async function runClaudeWithPrompt(
         logger.warn('ANTHROPIC_API_KEY not set - Claude execution may fail with authentication error');
       }
       logger.debug('Using API key authentication');
-      envVars.unshift(`ANTHROPIC_API_KEY=${apiKey}`); // Add at front
-      const envPrefix = envVars.join(' ') + ' ';
-      command = `cd ${options.workingDir} && ${envPrefix}echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
+      exportStatements.push(`export ANTHROPIC_API_KEY='${apiKey}'`);
     }
+
+    // Add GITHUB_TOKEN if available
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (githubToken) {
+      exportStatements.push(`export GITHUB_TOKEN='${githubToken}'`);
+      logger.debug('GITHUB_TOKEN will be passed to sandbox');
+    } else {
+      logger.debug('GITHUB_TOKEN not set - GitHub operations may require authentication');
+    }
+
+    // Build the full command with exports
+    const exportPrefix = exportStatements.length > 0 ? exportStatements.join(' && ') + ' && ' : '';
+    command = `cd ${options.workingDir} && ${exportPrefix}echo "${sanitizedPrompt}" | claude -p --dangerously-skip-permissions`;
 
     // Start output monitoring (if enabled)
     let monitor: StreamMonitor | null = null;
