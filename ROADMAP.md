@@ -23,7 +23,8 @@ All versions are linked for easy navigation, and each section includes status, o
 - **[v1.0](#v10---e2b-sandbox-integration-)** - E2B Sandbox Integration (E2B-specific implementation) ✅ (current)
 
 ### Planned Versions
-- **[v1.5](#v15---multi-provider-sandbox-architecture)** - Provider-Agnostic Sandbox Architecture (next - major enhancement)
+- **[v1.1](#v11---enhanced-e2b-features)** - Enhanced E2B Features (next - minor release)
+- **[v1.5](#v15---multi-provider-sandbox-architecture)** - Provider-Agnostic Sandbox Architecture (major enhancement)
 - **v2.0** - Enhanced observability and collaboration features (TBD)
 
 ---
@@ -649,6 +650,147 @@ After E2B integration:
 3. Parallel E2B sessions: Run multiple independent tasks simultaneously?
 4. Cost optimization: Sandbox pooling, pause/resume, cheaper tiers?
 5. APM orchestrator integration: Deep integration with apm-fhb workflows?
+
+---
+
+## v1.1 - Enhanced E2B Features
+
+**Status:** Planned (Next Minor Release)
+
+### Overview
+
+Incremental improvements to the E2B sandbox integration based on real-world usage feedback. Focuses on reliability, developer experience, and enterprise-readiness.
+
+### Key Features
+
+#### 1. Automatic Git Configuration in Sandboxes
+**Priority: Critical**
+
+Currently, git operations in E2B sandboxes fail or require manual configuration because:
+- `git user.name` and `git user.email` are not configured
+- SSH keys for private repositories are not available
+- GitHub CLI authentication is incomplete
+
+**Solution:**
+- Auto-configure git identity from local environment or explicit flags
+- Support `--git-user` and `--git-email` CLI flags
+- Inject SSH keys for private repository access
+- Pass GitHub CLI token for authenticated operations
+
+```bash
+# Example usage
+parallel-cc sandbox-run --repo . --prompt "Task" \
+  --git-user "Your Name" \
+  --git-email "your@email.com" \
+  --ssh-key ~/.ssh/id_ed25519
+```
+
+#### 2. Parallel Sandbox Execution
+**Priority: High**
+
+Run multiple independent E2B sandboxes simultaneously for different tasks.
+
+```bash
+# Run multiple tasks in parallel
+parallel-cc sandbox-run-multi --repo . \
+  --task "Implement auth module" \
+  --task "Add unit tests" \
+  --task "Update documentation"
+```
+
+#### 3. Private Repository Support
+**Priority: High**
+
+Enable E2B sandboxes to access private npm packages and git repositories.
+
+- SSH key injection for git clone operations
+- NPM token support for private packages
+- GitHub PAT support for API operations
+- Secure credential handling (never logged or exposed)
+
+#### 4. Enhanced Cost Controls
+**Priority: Medium**
+
+Better visibility and control over E2B spending.
+
+- Budget limits per session and globally
+- Cost estimation before execution
+- Detailed cost breakdown in session logs
+- Monthly usage reports
+
+#### 5. Sandbox Templates
+**Priority: Medium**
+
+Pre-configured sandbox environments for common workflows.
+
+```bash
+# Use pre-defined template
+parallel-cc sandbox-run --repo . --template node-20-typescript
+parallel-cc sandbox-run --repo . --template python-3.12-fastapi
+```
+
+Templates include:
+- Pre-installed dependencies
+- Optimized base images
+- Common tooling (linters, formatters, test runners)
+
+#### 6. E2B Integration Test Improvements
+**Priority: High**
+
+Fix and improve E2B integration tests:
+
+- Skip tests gracefully when E2B_API_KEY is not available
+- Add mock-based tests that don't require API access
+- Improve test reliability and reduce flakiness
+- Better error messages for test failures
+
+### Database Schema Changes
+
+```sql
+-- v1.1.0: Git configuration tracking
+ALTER TABLE sessions ADD COLUMN git_user TEXT;
+ALTER TABLE sessions ADD COLUMN git_email TEXT;
+ALTER TABLE sessions ADD COLUMN ssh_key_provided INTEGER DEFAULT 0;
+
+-- v1.1.0: Cost tracking improvements
+ALTER TABLE sessions ADD COLUMN budget_limit REAL;
+ALTER TABLE sessions ADD COLUMN cost_estimate REAL;
+ALTER TABLE sessions ADD COLUMN actual_cost REAL;
+```
+
+### Implementation Phases
+
+**Phase 1 (Week 1-2): Git Configuration & Test Fixes**
+- Implement git config injection in sandboxes
+- Add CLI flags for git identity
+- Fix/skip E2B integration tests appropriately
+- Improve test error messages
+
+**Phase 2 (Week 3-4): Private Repository Support**
+- SSH key injection infrastructure
+- NPM token support
+- GitHub PAT handling
+- Security audit of credential handling
+
+**Phase 3 (Week 5-6): Parallel Execution & Cost Controls**
+- Multi-task CLI command
+- Session parallelization
+- Budget limit enforcement
+- Cost estimation and tracking
+
+**Phase 4 (Week 7-8): Templates & Polish**
+- Template system design
+- Pre-built templates
+- Documentation updates
+- Integration testing
+
+### Success Metrics
+
+- ✅ Git operations work out-of-the-box in sandboxes
+- ✅ Private repository access works with proper credentials
+- ✅ All tests pass (or skip gracefully) without E2B_API_KEY
+- ✅ Budget limits prevent unexpected costs
+- ✅ Templates reduce setup time by 50%+
 
 ---
 
