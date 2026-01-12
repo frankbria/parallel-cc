@@ -1,8 +1,14 @@
 /**
  * Integration test for Claude Runner
  *
- * Note: These tests require E2B API key and actual sandbox creation
- * Run with: E2B_API_KEY=xxx npm test -- tests/e2b/claude-runner-integration.test.ts
+ * Note: These tests require E2B API key and actual sandbox creation.
+ * Tests are automatically skipped when E2B_API_KEY is not set.
+ *
+ * Run with:
+ *   E2B_API_KEY=xxx npm test -- tests/e2b/claude-runner-integration.test.ts
+ *
+ * Or use dedicated script:
+ *   npm run test:e2b
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -18,15 +24,16 @@ import {
   executionStateToSandboxStatus
 } from '../../src/e2b/claude-runner.js';
 import { SandboxStatus } from '../../src/types.js';
-
-// Skip tests if E2B API key not provided
-const skipE2B = !process.env.E2B_API_KEY;
+import { skipE2B, setupE2BTests } from './test-helpers.js';
 
 describe('Claude Runner Integration Tests', () => {
   let logger: Logger;
   let sandboxManager: SandboxManager;
   let sandbox: Sandbox | null = null;
   let sandboxId: string | null = null;
+
+  // Log E2B test status and validate environment
+  setupE2BTests();
 
   beforeAll(async () => {
     if (skipE2B) {

@@ -11,7 +11,10 @@
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "lint": "eslint src/",
-    "test": "vitest"
+    "test": "vitest",
+    "test:e2b": "E2B_REQUIRED=true vitest tests/e2b/ --run",
+    "test:all": "E2B_REQUIRED=true vitest --run",
+    "test:coverage": "vitest --run --coverage"
   },
   "dependencies": {
     "@babel/parser": "^7.28.5",

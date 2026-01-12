@@ -15,10 +15,17 @@
  * IMPORTANT: Tests requiring E2B_API_KEY are skipped when key is not available.
  * Set E2B_API_KEY environment variable to run full integration tests.
  *
+ * Run with:
+ *   E2B_API_KEY=xxx npm test -- tests/e2b/integration.test.ts
+ *
+ * Or use dedicated script:
+ *   npm run test:e2b
+ *
  * Target: <30s for full suite (with mocked E2B operations)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi, beforeAll } from 'vitest';
+import { HAS_E2B_API_KEY, skipE2B, setupE2BTests } from './test-helpers.js';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -47,8 +54,6 @@ const TEST_DIR = path.join(os.tmpdir(), 'parallel-cc-e2b-integration-test-' + pr
 const TEST_DB_PATH = path.join(TEST_DIR, 'e2b-integration.db');
 const TEST_REPO_PATH = path.join(TEST_DIR, 'test-repo');
 const TEST_WORKTREE_PATH = path.join(TEST_DIR, 'test-worktree');
-
-const HAS_E2B_API_KEY = !!process.env.E2B_API_KEY;
 
 // Mock E2B SDK globally
 vi.mock('e2b', () => ({
@@ -244,13 +249,8 @@ describe('E2B Integration Tests (v1.0)', () => {
   let db: SessionDB;
   let sandboxManager: SandboxManager;
 
-  beforeAll(() => {
-    // Warn if E2B_API_KEY is not set
-    if (!HAS_E2B_API_KEY) {
-      console.log('\n⚠️  Skipping E2B API tests: E2B_API_KEY environment variable not set');
-      console.log('   Set E2B_API_KEY to run full integration tests\n');
-    }
-  });
+  // Log E2B test status and validate environment
+  setupE2BTests();
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -313,7 +313,7 @@ describe('E2B Integration Tests (v1.0)', () => {
   // ==========================================================================
 
   describe('1. Full Workflow', () => {
-    it.skipIf(!HAS_E2B_API_KEY)('should execute complete autonomous workflow', async () => {
+    it.skipIf(skipE2B)('should execute complete autonomous workflow', async () => {
       // This test requires E2B_API_KEY and will make real API calls
       // Test execution time: ~5-10 seconds with real E2B API
 
