@@ -23,9 +23,12 @@ jobs:
     steps:
       - name: Calculate total changes
         id: calc
+        env:
+          ADDITIONS: ${{ github.event.pull_request.additions }}
+          DELETIONS: ${{ github.event.pull_request.deletions }}
         run: |
-          additions=${{ github.event.pull_request.additions }}
-          deletions=${{ github.event.pull_request.deletions }}
+          additions="${ADDITIONS:-0}"
+          deletions="${DELETIONS:-0}"
           total=$((additions + deletions))
           echo "total=$total" >> $GITHUB_OUTPUT
 
@@ -34,7 +37,7 @@ jobs:
         if: |
           github.event.pull_request.changed_files >= 5 ||
           steps.calc.outputs.total >= 20
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -84,7 +87,7 @@ jobs:
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} in repository ${{ github.repository }}.
 
-            PR TITLE: ${{ github.event.pull_request.title }}
+            PR TITLE: ${{ toJSON(github.event.pull_request.title) }}
 
             Please review this pull request and provide feedback on:
             - Code quality and best practices
