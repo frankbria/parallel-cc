@@ -543,6 +543,99 @@ export class SandboxManager {
   }
 
   /**
+   * Configure NPM authentication in sandbox for private package access
+   *
+   * Creates ~/.npmrc file with authentication token for the specified registry.
+   * This enables npm/yarn/pnpm to install private packages.
+   *
+   * Security:
+   * - Token is never logged
+   * - Token is sanitized (newlines removed)
+   * - Registry URL is validated
+   *
+   * @param sandbox - E2B Sandbox instance
+   * @param npmToken - NPM authentication token
+   * @param npmRegistry - NPM registry URL (default: https://registry.npmjs.org)
+   * @returns boolean indicating success
+   */
+  async configureNpmAuth(
+    sandbox: Sandbox,
+    npmToken: string,
+    npmRegistry: string = 'https://registry.npmjs.org'
+  ): Promise<boolean> {
+    try {
+      // Validate sandbox
+      if (!sandbox || !sandbox.files) {
+        this.logger.error('Invalid sandbox: missing files API');
+        return false;
+      }
+
+      // Validate token
+      if (!npmToken || typeof npmToken !== 'string' || !npmToken.trim()) {
+        this.logger.error('Invalid NPM token: must be a non-empty string');
+        return false;
+      }
+
+      // Reject tokens containing newlines (injection attack prevention)
+      // Legitimate NPM tokens never contain newlines
+      if (/[\r\n]/.test(npmToken)) {
+        this.logger.error('Invalid NPM token: contains newline characters');
+        return false;
+      }
+
+      const sanitizedToken = npmToken.trim();
+
+      // Validate registry URL
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(npmRegistry);
+      } catch {
+        this.logger.error(`Invalid registry URL format: ${npmRegistry}`);
+        return false;
+      }
+
+      // Check protocol
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        this.logger.error(`Invalid registry URL: must use http or https protocol`);
+        return false;
+      }
+
+      // Warn about insecure http
+      if (parsedUrl.protocol === 'http:') {
+        this.logger.warn('Using HTTP for NPM registry is insecure. Consider using HTTPS.');
+      }
+
+      // Build normalized registry (origin + optional path) without query/fragment
+      // This ensures auth scope and registry= line use the same normalized value
+      const cleanPath = parsedUrl.pathname && parsedUrl.pathname !== '/'
+        ? parsedUrl.pathname.replace(/\/$/, '')
+        : '';
+      const registryHost = parsedUrl.host + cleanPath;
+      const normalizedRegistry = `${parsedUrl.protocol}//${registryHost}`;
+
+      // Build .npmrc content
+      // Use function replacement to avoid $ character interpretation in registryHost
+      const npmrcContent = [
+        `//registry.npmjs.org/:_authToken=${sanitizedToken}`.replace(
+          'registry.npmjs.org',
+          () => registryHost
+        ),
+        `registry=${normalizedRegistry}`
+      ].join('\n') + '\n';
+
+      // Write .npmrc file
+      await sandbox.files.write('/root/.npmrc', npmrcContent);
+
+      this.logger.info('NPM authentication configured successfully');
+      return true;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to configure NPM config: ${errorMsg}`);
+      return false;
+    }
+  }
+
+  /**
    * Get sandbox cost estimation
    *
    * @param sandboxId - Sandbox ID
