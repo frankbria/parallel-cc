@@ -1232,7 +1232,7 @@ export async function runClaudeUpdate(
 
     return {
       success: false,
-      version: currentVersion !== 'unknown' ? currentVersion : 'unknown',
+      version: currentVersion,
       output: combinedOutput,
       error: errorMsg
     };
