@@ -423,13 +423,29 @@ describe('SSH Key Injector', () => {
   });
 
   describe('cleanupSSHKey', () => {
-    it('should remove SSH key files', async () => {
+    it('should remove SSH key files using id_* pattern when no keyFilename provided', async () => {
       const { cleanupSSHKey } = await import('../../src/e2b/ssh-key-injector.js');
 
       await cleanupSSHKey(mockSandbox, mockLogger as any);
 
       expect(mockSandbox.commands.run).toHaveBeenCalledWith(
-        expect.stringMatching(/rm.*id_/),
+        expect.stringMatching(/rm.*id_\*/),
+        expect.any(Object)
+      );
+    });
+
+    it('should remove specific key file when keyFilename is provided', async () => {
+      const { cleanupSSHKey } = await import('../../src/e2b/ssh-key-injector.js');
+
+      await cleanupSSHKey(mockSandbox, mockLogger as any, 'my_deploy_key');
+
+      expect(mockSandbox.commands.run).toHaveBeenCalledWith(
+        expect.stringMatching(/rm.*~\/\.ssh\/my_deploy_key/),
+        expect.any(Object)
+      );
+      // Should NOT use id_* pattern when specific filename provided
+      expect(mockSandbox.commands.run).not.toHaveBeenCalledWith(
+        expect.stringMatching(/id_\*/),
         expect.any(Object)
       );
     });

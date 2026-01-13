@@ -212,10 +212,14 @@ describe('Logger Redaction', () => {
       process.env.PARALLEL_CC_LOG_LEVEL = 'WARN';
       const logger = new Logger();
 
-      const sensitiveMessage = 'Warning: ssh-rsa AAAAB3... detected';
+      // Use a complete public key pattern (40+ base64 chars required for redaction)
+      const sensitiveMessage = 'Warning: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC' + 'A'.repeat(100) + ' user@host detected';
       logger.warn(sensitiveMessage);
 
       expect(consoleWarnSpy).toHaveBeenCalled();
+      const loggedMessage = consoleWarnSpy.mock.calls[0][0];
+      expect(loggedMessage).toContain('[REDACTED SSH KEY]');
+      expect(loggedMessage).not.toContain('AAAAB3NzaC1yc2EAAAADAQABAAABgQC');
     });
 
     it('should redact sensitive data in debug logs', () => {

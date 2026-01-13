@@ -54,6 +54,8 @@ export interface SSHInjectionResult {
   keyFingerprint?: string;
   /** Detected key type */
   keyType?: string;
+  /** Filename of the injected key (for cleanup) */
+  keyFilename?: string;
   /** Error message if injection failed */
   error?: string;
 }
@@ -444,7 +446,8 @@ export async function injectSSHKey(
     return {
       success: true,
       keyFingerprint: fingerprint,
-      keyType
+      keyType,
+      keyFilename
     };
 
   } catch (error) {
@@ -465,21 +468,25 @@ export async function injectSSHKey(
  * Clean up SSH key from sandbox
  *
  * Removes all SSH-related files created during injection:
- * - Private key file
+ * - Private key file (by name if provided, otherwise id_* pattern)
  * - known_hosts
  * - SSH config
  *
  * @param sandbox - E2B Sandbox instance
  * @param logger - Logger instance
+ * @param keyFilename - Optional filename of the injected key (for precise cleanup)
  */
 export async function cleanupSSHKey(
   sandbox: Sandbox,
-  logger: Logger
+  logger: Logger,
+  keyFilename?: string
 ): Promise<void> {
   logger.debug('Cleaning up SSH key from sandbox...');
 
+  // Use specific filename if provided, otherwise fall back to id_* pattern
+  const keyPattern = keyFilename ? `~/.ssh/${keyFilename}` : '~/.ssh/id_*';
   const cleanupCommands = [
-    'rm -f ~/.ssh/id_* ~/.ssh/known_hosts ~/.ssh/config'
+    `rm -f ${keyPattern} ~/.ssh/known_hosts ~/.ssh/config`
   ];
 
   for (const cmd of cleanupCommands) {

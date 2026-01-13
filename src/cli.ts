@@ -1671,6 +1671,7 @@ Examples:
       // Wrap tarball usage in try/finally for guaranteed cleanup
       let sandbox: Awaited<ReturnType<typeof sandboxManager.createSandbox>>['sandbox'] | undefined;
       let sshKeyInjected = false;
+      let injectedKeyFilename: string | undefined;
       try {
         // Step 4: Create sandbox and upload
         if (!options.json) {
@@ -1722,6 +1723,7 @@ Examples:
         }
 
         sshKeyInjected = true;
+        injectedKeyFilename = injectionResult.keyFilename;
         if (!options.json) {
           console.log(chalk.green(`✓ SSH key injected (${injectionResult.keyType || 'unknown'} type)`));
           if (injectionResult.keyFingerprint) {
@@ -2009,7 +2011,7 @@ Examples:
         // Best-effort cleanup of SSH key from sandbox (before termination)
         if (sshKeyInjected && sandbox) {
           try {
-            await cleanupSSHKey(sandbox, logger);
+            await cleanupSSHKey(sandbox, logger, injectedKeyFilename);
           } catch (cleanupError) {
             // Log but don't throw - don't mask original errors
             logger.warn(`Failed to cleanup SSH key: ${cleanupError instanceof Error ? cleanupError.message : 'Unknown error'}`);
