@@ -1,0 +1,7 @@
+# GitGuardian configuration
+# Exclude test files that contain intentional fake secrets for testing redaction functionality
+
+paths-ignore:
+  - '**/tests/**'
+  - '**/*.test.ts'
+  - '**/*.spec.ts'
