@@ -92,6 +92,24 @@ export interface ClaudeExecutionOptions {
    * Content of ~/.claude/.credentials.json
    */
   oauthCredentials?: string;
+
+  /**
+   * Git user name for commits in sandbox
+   * Takes precedence over environment variables and auto-detection
+   */
+  gitUser?: string;
+
+  /**
+   * Git user email for commits in sandbox
+   * Takes precedence over environment variables and auto-detection
+   */
+  gitEmail?: string;
+
+  /**
+   * Local repository path for git identity auto-detection
+   * Used to read local git config when gitUser/gitEmail not provided
+   */
+  localRepoPath?: string;
 }
 
 /**
@@ -159,6 +177,51 @@ interface ClaudeUpdateResult {
   error?: string;
 }
 
+/**
+ * Git identity source - indicates where the git identity was resolved from
+ */
+export type GitIdentitySource = 'cli' | 'env' | 'auto' | 'default';
+
+/**
+ * Resolved git identity for sandbox commits
+ */
+export interface GitIdentity {
+  /**
+   * Git user name for commits
+   */
+  name: string;
+
+  /**
+   * Git user email for commits
+   */
+  email: string;
+
+  /**
+   * Source of the identity (for logging/debugging)
+   */
+  source: GitIdentitySource;
+}
+
+/**
+ * Options for resolving git identity
+ */
+export interface GitIdentityOptions {
+  /**
+   * Git user name from CLI flag
+   */
+  gitUser?: string;
+
+  /**
+   * Git email from CLI flag
+   */
+  gitEmail?: string;
+
+  /**
+   * Local repository path for auto-detection
+   */
+  repoPath?: string;
+}
+
 // ============================================================================
 // Main Execution Function
 // ============================================================================
@@ -199,7 +262,10 @@ export async function executeClaudeInSandbox(
     localLogPath: options.localLogPath ?? '',
     onProgress: options.onProgress ?? (() => {}),
     authMethod: options.authMethod ?? 'api-key',
-    oauthCredentials: options.oauthCredentials ?? ''
+    oauthCredentials: options.oauthCredentials ?? '',
+    gitUser: options.gitUser ?? '',
+    gitEmail: options.gitEmail ?? '',
+    localRepoPath: options.localRepoPath ?? ''
   };
 
   logger.info(`Starting Claude execution in sandbox ${sandbox.sandboxId}`);
@@ -272,7 +338,15 @@ export async function executeClaudeInSandbox(
 
     // Step 1.9: Initialize git repository (needed for download and gh CLI)
     logger.info('Step 1.9/5: Initializing git repository...');
-    const gitInit = await initializeGitRepo(sandbox, logger, opts.workingDir);
+
+    // Resolve git identity for commits in sandbox
+    const gitIdentity = await resolveGitIdentity({
+      gitUser: opts.gitUser || undefined,
+      gitEmail: opts.gitEmail || undefined,
+      repoPath: opts.localRepoPath || undefined
+    });
+
+    const gitInit = await initializeGitRepo(sandbox, logger, opts.workingDir, gitIdentity);
     if (!gitInit) {
       logger.warn('Git initialization failed - download and GitHub operations may not work');
     }
@@ -536,6 +610,102 @@ async function setupOAuthCredentials(
   }
 }
 
+// ============================================================================
+// Git Identity Resolution
+// ============================================================================
+
+/**
+ * Default git identity used when no other configuration is available
+ */
+const DEFAULT_GIT_IDENTITY: Omit<GitIdentity, 'source'> = {
+  name: 'E2B Sandbox',
+  email: 'sandbox@e2b.dev'
+};
+
+/**
+ * Resolve git identity for sandbox commits
+ *
+ * Implements a three-tier configuration system:
+ * 1. CLI flags (highest priority) - explicit user intent
+ * 2. Environment variables - session-level configuration
+ * 3. Local git config auto-detection - seamless default
+ * 4. Hardcoded defaults (lowest priority) - backward compatibility
+ *
+ * @param options - Git identity options
+ * @returns Resolved git identity with source information
+ */
+export async function resolveGitIdentity(
+  options: GitIdentityOptions = {}
+): Promise<GitIdentity> {
+  const { gitUser, gitEmail, repoPath } = options;
+
+  // Priority 1: CLI flags (both must be provided)
+  const trimmedUser = gitUser?.trim();
+  const trimmedEmail = gitEmail?.trim();
+  if (trimmedUser && trimmedEmail) {
+    return {
+      name: trimmedUser,
+      email: trimmedEmail,
+      source: 'cli'
+    };
+  }
+
+  // Priority 2: Environment variables (both must be set)
+  const envUser = process.env.PARALLEL_CC_GIT_USER?.trim();
+  const envEmail = process.env.PARALLEL_CC_GIT_EMAIL?.trim();
+  if (envUser && envEmail) {
+    return {
+      name: envUser,
+      email: envEmail,
+      source: 'env'
+    };
+  }
+
+  // Priority 3: Auto-detect from local git config
+  if (repoPath) {
+    try {
+      const { execSync } = await import('child_process');
+      const { realpathSync, existsSync } = await import('fs');
+
+      // Verify the path exists
+      if (existsSync(repoPath)) {
+        // Resolve symlinks for accurate git config reading
+        const realPath = realpathSync(repoPath);
+
+        // Try to read git config user.name and user.email
+        const autoName = execSync('git config user.name', {
+          cwd: realPath,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'ignore'] // Suppress stderr
+        }).trim();
+
+        const autoEmail = execSync('git config user.email', {
+          cwd: realPath,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'ignore']
+        }).trim();
+
+        if (autoName && autoEmail) {
+          return {
+            name: autoName,
+            email: autoEmail,
+            source: 'auto'
+          };
+        }
+      }
+    } catch {
+      // Git config not available or path is not a git repo
+      // Fall through to defaults
+    }
+  }
+
+  // Priority 4: Hardcoded defaults (backward compatibility)
+  return {
+    ...DEFAULT_GIT_IDENTITY,
+    source: 'default'
+  };
+}
+
 /**
  * Initialize a git repository in the sandbox workspace
  *
@@ -553,9 +723,19 @@ async function setupOAuthCredentials(
 async function initializeGitRepo(
   sandbox: Sandbox,
   logger: Logger,
-  workingDir: string = '/workspace'
+  workingDir: string = '/workspace',
+  gitIdentity?: GitIdentity
 ): Promise<boolean> {
   logger.info('Initializing git repository in sandbox workspace...');
+
+  // Use provided identity or default
+  const identity = gitIdentity ?? {
+    name: DEFAULT_GIT_IDENTITY.name,
+    email: DEFAULT_GIT_IDENTITY.email,
+    source: 'default' as GitIdentitySource
+  };
+
+  logger.info(`Git identity: "${identity.name}" <${identity.email}> (source: ${identity.source})`);
 
   try {
     // Step 1: Initialize git repo
@@ -571,12 +751,16 @@ async function initializeGitRepo(
     }
 
     // Step 2: Configure git user (required for commits)
+    // Escape double quotes in identity values for shell safety
+    const escapedName = identity.name.replace(/"/g, '\\"');
+    const escapedEmail = identity.email.replace(/"/g, '\\"');
+
     const configName = await sandbox.commands.run(
-      'git config user.name "E2B Sandbox"',
+      `git config user.name "${escapedName}"`,
       { cwd: workingDir, timeoutMs: 5000 }
     );
     const configEmail = await sandbox.commands.run(
-      'git config user.email "sandbox@e2b.dev"',
+      `git config user.email "${escapedEmail}"`,
       { cwd: workingDir, timeoutMs: 5000 }
     );
 

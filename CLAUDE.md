@@ -492,6 +492,10 @@ parallel-cc sandbox-run \
   --auth-method oauth \
   --branch auto
 
+# Override git identity for commits
+parallel-cc sandbox-run --repo . --prompt "Fix bug" \
+  --git-user "CI Bot" --git-email "ci@example.com"
+
 # Monitor active sandboxes
 parallel-cc status --sandbox-only
 parallel-cc sandbox-logs --session-id <id> --follow
@@ -549,6 +553,39 @@ parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
 - OAuth method requires running `/login` within Claude Code first to generate credentials
 - OAuth credentials are securely copied from ~/.claude/.credentials.json to sandbox
 - Both methods work identically once authenticated
+
+### Git Identity Configuration
+
+Commits made in E2B sandboxes use a configurable git identity. The system uses a three-tier priority:
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 (Highest) | CLI Flags | `--git-user "John" --git-email "john@example.com"` |
+| 2 | Environment Variables | `PARALLEL_CC_GIT_USER`, `PARALLEL_CC_GIT_EMAIL` |
+| 3 | Local Git Config | Auto-detected from repository |
+| 4 (Lowest) | Default | `"E2B Sandbox" <sandbox@e2b.dev>` |
+
+**Usage:**
+```bash
+# Default: auto-detect from local git config
+parallel-cc sandbox-run --repo . --prompt "Fix bug"
+
+# Override with CLI flags
+parallel-cc sandbox-run --repo . --prompt "Fix bug" \
+  --git-user "CI Bot" \
+  --git-email "ci@example.com"
+
+# Set via environment variables
+export PARALLEL_CC_GIT_USER="Deploy Bot"
+export PARALLEL_CC_GIT_EMAIL="deploy@example.com"
+parallel-cc sandbox-run --repo . --prompt "Deploy feature"
+```
+
+**Notes:**
+- Both `--git-user` and `--git-email` must be provided together for CLI override
+- Partial configuration (only one flag) triggers a warning and uses fallback
+- Auto-detection reads from local git config (repository-level or global)
+- Default identity maintains backward compatibility
 
 ### Branch Management
 
