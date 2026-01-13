@@ -134,10 +134,12 @@ tests/
 ├── ast-analyzer.basic.test.ts      # AST analyzer tests (v0.5)
 ├── auto-fix-engine.test.ts         # Auto-fix engine tests (v0.5)
 ├── merge-strategies.basic.test.ts  # Merge strategies tests (v0.5)
+├── logger-redaction.test.ts        # Sensitive data redaction tests (v1.1)
+├── e2b/ssh-key-injector.test.ts    # SSH key injection tests (v1.1)
 ├── integration.test.ts             # End-to-end integration tests (v0.5)
 └── mcp-tools-smoke.test.ts         # MCP tools smoke tests (v0.5)
 
-Total: 441 tests, 100% passing, 87.5% function coverage
+Total: 507 tests (441 + 66 new), 100% passing, 87.5% function coverage
 
 vitest.config.ts  # Test framework configuration (project root)
 ```
@@ -735,6 +737,62 @@ The PR will include:
 - **Checklist:** Review todos for security, tests, changes
 - **Branch:** Auto-generated (`e2b/[slug]-[timestamp]`) or custom
 
+### SSH Key Injection (Private Repository Access)
+
+**Overview:**
+SSH key injection enables access to private Git repositories within E2B sandboxes. This is an opt-in security feature that requires explicit user consent.
+
+**Usage:**
+```bash
+# Basic SSH key injection
+parallel-cc sandbox-run --repo . --prompt "Clone private repo" \
+  --ssh-key ~/.ssh/id_ed25519
+
+# Non-interactive (CI/CD) - requires explicit confirmation flag
+parallel-cc sandbox-run --repo . --prompt "Build private deps" \
+  --ssh-key ~/.ssh/deploy_key --confirm-ssh-key --json
+
+# With OAuth and git-live
+parallel-cc sandbox-run --repo . --prompt "Update dependencies" \
+  --ssh-key ~/.ssh/id_ed25519 --auth-method oauth --git-live
+```
+
+**Security Flow:**
+1. **Validation**: Key file existence, permissions (warns if not 600/400), format verification
+2. **Security Warning**: Interactive prompt explaining risks (skippable with `--confirm-ssh-key`)
+3. **Injection**: Key written to sandbox's `~/.ssh` with 600 permissions
+4. **Known Hosts**: GitHub, GitLab, Bitbucket automatically added
+5. **SSH Config**: StrictHostKeyChecking set to `accept-new`
+6. **Cleanup**: Key removed from sandbox after execution (in finally block)
+
+**Security Considerations:**
+- SSH keys are transmitted over encrypted connection (E2B uses TLS)
+- Keys are stored temporarily in sandbox memory/disk
+- Keys are cleaned up after execution completes (even on errors)
+- Passphrase-protected keys won't work (non-interactive mode)
+- All key-related data is redacted from logs automatically
+
+**Best Practices:**
+- Use dedicated deploy keys with minimal permissions (read-only when possible)
+- Rotate keys regularly
+- Monitor key usage in your git provider's dashboard
+- Prefer repository-specific deploy keys over personal SSH keys
+- Never use production keys for development/testing
+
+**Supported Key Types:**
+- RSA (`id_rsa`)
+- Ed25519 (`id_ed25519`) - Recommended
+- ECDSA (`id_ecdsa`)
+- DSA (`id_dsa`) - Deprecated, not recommended
+
+**Troubleshooting:**
+| Error | Solution |
+|-------|----------|
+| "Permission denied (publickey)" | Ensure key is added to GitHub/GitLab |
+| "Bad permissions" | Run `chmod 600 ~/.ssh/id_*` |
+| "Invalid key format" | Verify file is a private key (not .pub) |
+| "Passphrase required" | Use a key without passphrase for automation |
+
 ### Requirements & Limitations
 
 **Environment Variables:**
@@ -816,7 +874,8 @@ src/e2b/
 ├── sandbox-manager.ts    # E2B sandbox lifecycle management
 ├── file-sync.ts          # Upload/download with compression
 ├── claude-runner.ts      # Autonomous Claude execution
-└── output-monitor.ts     # Real-time output streaming
+├── output-monitor.ts     # Real-time output streaming
+└── ssh-key-injector.ts   # SSH key injection for private repo access (v1.1)
 ```
 
 ## Coding Standards

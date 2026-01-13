@@ -32,6 +32,7 @@ import { SandboxManager } from './e2b/sandbox-manager.js';
 import { createTarball, uploadToSandbox, downloadChangedFiles, scanForCredentials } from './e2b/file-sync.js';
 import { executeClaudeInSandbox } from './e2b/claude-runner.js';
 import { pushToRemoteAndCreatePR } from './e2b/git-live.js';
+import { validateSSHKeyPath, injectSSHKey, cleanupSSHKey, getSecurityWarning } from './e2b/ssh-key-injector.js';
 import { logger } from './logger.js';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -1391,6 +1392,8 @@ Examples:
   .option('--target-branch <branch>', 'Target branch for PR when using --git-live (default: main)', 'main')
   .option('--git-user <name>', 'Git user name for commits in sandbox (default: auto-detect from local git config)')
   .option('--git-email <email>', 'Git user email for commits in sandbox (default: auto-detect from local git config)')
+  .option('--ssh-key <path>', 'Path to SSH private key for private repository access (e.g., ~/.ssh/id_ed25519)')
+  .option('--confirm-ssh-key', 'Skip interactive SSH key security warning (for non-interactive use)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1504,6 +1507,62 @@ Examples:
         process.exit(1);
       }
 
+      // Validate SSH key if provided
+      let sshKeyValidation: Awaited<ReturnType<typeof validateSSHKeyPath>> | undefined;
+      if (options.sshKey) {
+        // Expand ~ to home directory
+        const sshKeyPath = options.sshKey.startsWith('~')
+          ? path.join(os.homedir(), options.sshKey.slice(1))
+          : options.sshKey;
+
+        sshKeyValidation = await validateSSHKeyPath(sshKeyPath);
+
+        if (!sshKeyValidation.valid) {
+          if (options.json) {
+            console.log(JSON.stringify({
+              success: false,
+              error: `SSH key validation failed: ${sshKeyValidation.error}`,
+              keyPath: sshKeyPath
+            }));
+          } else {
+            console.error(chalk.red(`✗ SSH key validation failed: ${sshKeyValidation.error}`));
+          }
+          process.exit(1);
+        }
+
+        // Warn about permissions if needed
+        if (sshKeyValidation.permissionsWarning && !options.json) {
+          console.warn(chalk.yellow(`⚠ ${sshKeyValidation.permissionsWarning}`));
+        }
+
+        // Display security warning and get confirmation
+        if (!options.json && !options.confirmSshKey) {
+          console.log('');
+          console.log(chalk.yellow(getSecurityWarning(sshKeyPath)));
+          console.log('');
+
+          const answer = await promptUser('Do you want to proceed with SSH key injection? (y/n): ');
+          if (answer !== 'y' && answer !== 'yes') {
+            console.log(chalk.yellow('✓ Cancelled - SSH key will not be used'));
+            options.sshKey = undefined;
+            sshKeyValidation = undefined;
+          } else {
+            console.log(chalk.green('✓ Proceeding with SSH key injection'));
+          }
+        } else if (options.json && !options.confirmSshKey) {
+          // In JSON mode without --confirm-ssh-key, require explicit confirmation
+          console.log(JSON.stringify({
+            success: false,
+            error: 'SSH key injection requires explicit confirmation',
+            hint: 'Use --confirm-ssh-key flag to skip interactive prompt in non-interactive mode'
+          }));
+          process.exit(1);
+        }
+
+        // Update the key path to expanded version
+        options.sshKey = sshKeyPath;
+      }
+
       // Read prompt
       let prompt: string;
       if (options.promptFile) {
@@ -1610,14 +1669,17 @@ Examples:
       }
 
       // Wrap tarball usage in try/finally for guaranteed cleanup
+      let sandbox: Awaited<ReturnType<typeof sandboxManager.createSandbox>>['sandbox'] | undefined;
+      let sshKeyInjected = false;
       try {
         // Step 4: Create sandbox and upload
         if (!options.json) {
           console.log(chalk.blue('\nStep 4/6: Creating E2B sandbox...'));
         }
 
-        const { sandbox, sandboxId: createdSandboxId, status } = await sandboxManager.createSandbox(sessionId);
-        sandboxId = createdSandboxId; // Track for cleanup in catch block
+        const createResult = await sandboxManager.createSandbox(sessionId);
+        sandbox = createResult.sandbox;
+        sandboxId = createResult.sandboxId; // Track for cleanup in catch block
 
       if (!options.json) {
         console.log(chalk.green(`✓ Sandbox created: ${sandboxId}`));
@@ -1635,6 +1697,37 @@ Examples:
       if (!options.json) {
         console.log(chalk.green(`✓ Workspace uploaded: ${(uploadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
         console.log(chalk.dim(`  Duration: ${(uploadResult.duration / 1000).toFixed(1)}s`));
+      }
+
+      // Inject SSH key if provided (after sandbox creation and upload)
+      if (options.sshKey) {
+        if (!options.json) {
+          console.log(chalk.dim('  Injecting SSH key for private repository access...'));
+        }
+
+        const injectionResult = await injectSSHKey(sandbox, options.sshKey, logger);
+
+        if (!injectionResult.success) {
+          if (options.json) {
+            console.log(JSON.stringify({
+              success: false,
+              error: `SSH key injection failed: ${injectionResult.error}`,
+              keyPath: options.sshKey
+            }));
+          } else {
+            console.error(chalk.red(`✗ SSH key injection failed: ${injectionResult.error}`));
+          }
+          await sandboxManager.terminateSandbox(sandboxId);
+          process.exit(1);
+        }
+
+        sshKeyInjected = true;
+        if (!options.json) {
+          console.log(chalk.green(`✓ SSH key injected (${injectionResult.keyType || 'unknown'} type)`));
+          if (injectionResult.keyFingerprint) {
+            console.log(chalk.dim(`  Fingerprint: ${injectionResult.keyFingerprint}`));
+          }
+        }
       }
 
         // Create E2B session in database
@@ -1913,6 +2006,16 @@ Examples:
       }
 
       } finally {
+        // Best-effort cleanup of SSH key from sandbox (before termination)
+        if (sshKeyInjected && sandbox) {
+          try {
+            await cleanupSSHKey(sandbox, logger);
+          } catch (cleanupError) {
+            // Log but don't throw - don't mask original errors
+            logger.warn(`Failed to cleanup SSH key: ${cleanupError instanceof Error ? cleanupError.message : 'Unknown error'}`);
+          }
+        }
+
         // Best-effort cleanup of tarball
         try {
           const tarballExists = await fs.access(tarballResult.path).then(() => true).catch(() => false);
