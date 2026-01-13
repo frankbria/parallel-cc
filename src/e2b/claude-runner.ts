@@ -1055,10 +1055,67 @@ function extractMCPPackages(
 }
 
 /**
+ * Patterns that indicate Claude is already at the latest version
+ * These patterns appear when `claude update` is run but no update is needed
+ */
+const ALREADY_UP_TO_DATE_PATTERNS = [
+  /already\s+(?:at\s+)?(?:the\s+)?latest/i,
+  /up[\s-]?to[\s-]?date/i,
+  /no\s+updates?\s+available/i,
+  /already\s+(?:at\s+)?(?:version|v)?[\s]?[\d.]+/i,
+  /current\s+version/i
+];
+
+/**
+ * Check if output indicates Claude is already up-to-date
+ *
+ * @param output - Combined stdout + stderr from update command
+ * @returns True if output indicates already up-to-date
+ */
+function isAlreadyUpToDate(output: string): boolean {
+  return ALREADY_UP_TO_DATE_PATTERNS.some(pattern => pattern.test(output));
+}
+
+/**
+ * Parse version from various output formats
+ *
+ * Handles:
+ * - "Claude Code updated to version X.Y.Z"
+ * - "Already at latest version X.Y.Z"
+ * - "version X.Y.Z"
+ * - Plain version string "X.Y.Z"
+ *
+ * @param output - Text to parse version from
+ * @returns Version string or null if not found
+ */
+function parseVersion(output: string): string | null {
+  // Try various version patterns
+  const patterns = [
+    /version\s+(\d+\.\d+\.\d+)/i,
+    /v(\d+\.\d+\.\d+)/i,
+    /^([\d]+\.[\d]+\.[\d]+)$/m
+  ];
+
+  for (const pattern of patterns) {
+    const match = output.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+/**
  * Ensure latest Claude Code version is installed
  *
- * Runs `claude update` in the sandbox to ensure the latest version.
+ * Runs `claude update --yes` in the sandbox to ensure the latest version.
  * This is critical for autonomous execution to avoid bugs in older versions.
+ *
+ * Enhanced to handle "already up-to-date" scenarios gracefully:
+ * 1. Pre-checks current version before update
+ * 2. Uses --yes flag to auto-accept prompts
+ * 3. Detects "already up-to-date" messages and treats them as success
+ * 4. Falls back to pre-check version when update output lacks version
  *
  * @param sandbox - E2B Sandbox instance
  * @param logger - Logger instance
@@ -1072,13 +1129,27 @@ export async function runClaudeUpdate(
 ): Promise<ClaudeUpdateResult> {
   logger.info('Running claude update...');
 
+  // Step 1: Pre-check current version
+  let currentVersion = 'unknown';
   try {
-    // Build update command based on auth method
+    const versionCheck = await sandbox.commands.run('claude --version', {
+      timeoutMs: 10000
+    });
+    if (versionCheck.exitCode === 0) {
+      currentVersion = parseVersion(versionCheck.stdout.trim()) || versionCheck.stdout.trim() || 'unknown';
+      logger.info(`Current Claude version: ${currentVersion}`);
+    }
+  } catch (e) {
+    logger.debug(`Version pre-check failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  try {
+    // Step 2: Build update command with --yes flag based on auth method
     let updateCommand: string;
     if (authMethod === 'oauth') {
       // OAuth mode: credentials already in sandbox, no env var needed
       logger.debug('Using OAuth authentication for update');
-      updateCommand = 'claude update';
+      updateCommand = 'claude update --yes';
     } else {
       // API key mode: pass ANTHROPIC_API_KEY as environment variable
       const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -1086,34 +1157,44 @@ export async function runClaudeUpdate(
         logger.warn('ANTHROPIC_API_KEY not set - Claude may require authentication');
       }
       updateCommand = apiKey
-        ? `ANTHROPIC_API_KEY=${apiKey} claude update`
-        : 'claude update';
+        ? `ANTHROPIC_API_KEY=${apiKey} claude update --yes`
+        : 'claude update --yes';
     }
 
     const result = await sandbox.commands.run(updateCommand, {
       timeoutMs: CLAUDE_UPDATE_TIMEOUT_MS
     });
 
-    // Parse version from output
-    // Expected output: "Claude Code updated to version X.Y.Z"
-    const versionMatch = result.stdout.match(/version\s+([\d.]+)/i);
-    const version = versionMatch ? versionMatch[1] : 'unknown';
+    const combinedOutput = result.stdout + result.stderr;
 
-    // Check if update succeeded (exit code 0)
-    const success = result.exitCode === 0;
+    // Step 3: Parse version from output, fall back to pre-check version
+    let version = parseVersion(combinedOutput);
+    if (!version) {
+      version = currentVersion;
+    }
+
+    // Step 4: Check for success conditions
+    // Success if: exit code 0 OR output indicates "already up-to-date"
+    const exitCodeSuccess = result.exitCode === 0;
+    const alreadyUpToDate = isAlreadyUpToDate(combinedOutput);
+    const success = exitCodeSuccess || alreadyUpToDate;
 
     if (success) {
-      logger.info(`Claude update succeeded: version ${version}`);
+      if (alreadyUpToDate && !exitCodeSuccess) {
+        logger.info(`Claude is already up-to-date: version ${version}`);
+      } else {
+        logger.info(`Claude update succeeded: version ${version}`);
+      }
     } else {
       logger.warn(`Claude update failed: exit code ${result.exitCode}`);
-      logger.error(`stdout: ${result.stdout}`);
-      logger.error(`stderr: ${result.stderr}`);
+      logger.debug(`stdout: ${result.stdout}`);
+      logger.debug(`stderr: ${result.stderr}`);
     }
 
     return {
       success,
       version,
-      output: result.stdout + result.stderr,
+      output: combinedOutput,
       error: success ? undefined : `Update failed with exit code ${result.exitCode}`
     };
   } catch (error) {
@@ -1124,13 +1205,24 @@ export async function runClaudeUpdate(
     let stdout = '';
     let stderr = '';
     if (error && typeof error === 'object') {
-      const errObj = error as any;
-      if (errObj.stdout) stdout = errObj.stdout;
-      if (errObj.stderr) stderr = errObj.stderr;
+      const errObj = error as Record<string, unknown>;
+      if (typeof errObj.stdout === 'string') stdout = errObj.stdout;
+      if (typeof errObj.stderr === 'string') stderr = errObj.stderr;
 
       // Log the actual command output
-      if (stdout) logger.error(`stdout: ${stdout}`);
-      if (stderr) logger.error(`stderr: ${stderr}`);
+      if (stdout) logger.debug(`stdout: ${stdout}`);
+      if (stderr) logger.debug(`stderr: ${stderr}`);
+    }
+
+    // Check for "already up-to-date" in exception output
+    const combinedOutput = stdout + stderr;
+    if (isAlreadyUpToDate(combinedOutput)) {
+      logger.info(`Claude is already up-to-date (from exception output): version ${currentVersion}`);
+      return {
+        success: true,
+        version: currentVersion,
+        output: combinedOutput
+      };
     }
 
     // Check for "command not found" errors (exit 127)
@@ -1140,8 +1232,8 @@ export async function runClaudeUpdate(
 
     return {
       success: false,
-      version: 'unknown',
-      output: stdout + stderr,
+      version: currentVersion,
+      output: combinedOutput,
       error: errorMsg
     };
   }

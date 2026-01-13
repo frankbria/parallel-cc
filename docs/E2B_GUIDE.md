@@ -235,7 +235,7 @@ Options:
   --dry-run                  Test upload/download without execution
   --no-stream                Disable real-time output streaming
   --local-log <path>         Save full execution log to local file
-  --skip-claude-update       Skip running 'claude update' (not recommended)
+  --skip-claude-update       Skip running 'claude update' (see note below)
 
 Examples:
   # Simple prompt
@@ -928,6 +928,44 @@ export ANTHROPIC_API_KEY="sk-ant-your-key"
 # 4. Retry sandbox execution
 parallel-cc sandbox-run --repo . --prompt "..."
 ```
+
+#### Issue: "Claude update failed"
+
+**Symptoms:**
+```
+[INFO] Running claude update...
+[WARN] Claude update failed: exit code 1
+```
+
+**Causes and Solutions:**
+
+The `claude update` command may return non-zero exit codes even in non-error conditions:
+
+1. **Already up-to-date**: When Claude is already at the latest version, `claude update` may return exit code 1 with a message like "Already at latest version". As of v1.1, this is handled gracefully and treated as success.
+
+2. **Authentication required**: The update command requires `ANTHROPIC_API_KEY` to be set. Without it, the command will fail.
+   ```bash
+   # Solution: Set API key before running
+   export ANTHROPIC_API_KEY="sk-ant-your-key"
+   ```
+
+3. **Permission issues**: In some E2B templates, global npm operations may fail. The update function uses `--yes` flag and handles these scenarios.
+
+**When to use `--skip-claude-update`:**
+- If you're using a recent E2B template with Claude Code 1.0.67+ pre-installed
+- If you're experiencing persistent update failures and want to proceed with the installed version
+- For faster sandbox startup when update isn't critical
+
+```bash
+# Skip update if experiencing issues
+parallel-cc sandbox-run --repo . \
+  --prompt "..." \
+  --skip-claude-update
+
+# The installed version in the E2B template is typically recent enough
+```
+
+**Note:** The update function now detects "already up-to-date" messages in the output and treats them as success, even if the exit code is non-zero.
 
 #### Issue: "Timeout warnings not appearing"
 
