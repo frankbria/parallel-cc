@@ -1369,6 +1369,10 @@ Git Identity (for commits in sandbox):
   PARALLEL_CC_GIT_USER    Environment variable fallback
   PARALLEL_CC_GIT_EMAIL   Environment variable fallback
 
+NPM Authentication (for private packages):
+  --npm-token <token>     NPM token (or set PARALLEL_CC_NPM_TOKEN env var)
+  --npm-registry <url>    Custom registry (default: registry.npmjs.org)
+
 Examples:
   # Default: uncommitted changes, review before committing
   parallel-cc sandbox-run --repo . --prompt "Fix bug"
@@ -1380,7 +1384,13 @@ Examples:
   parallel-cc sandbox-run --repo . --prompt "Fix #42" --branch feature/issue-42
 
   # Override git identity for commits
-  parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-user "CI Bot" --git-email "ci@example.com"`)
+  parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-user "CI Bot" --git-email "ci@example.com"
+
+  # Private NPM packages
+  parallel-cc sandbox-run --repo . --prompt "Install deps" --npm-token "npm_xxx"
+
+  # Custom NPM registry
+  parallel-cc sandbox-run --repo . --prompt "Task" --npm-token "xxx" --npm-registry "https://npm.company.com"`)
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
@@ -1394,6 +1404,8 @@ Examples:
   .option('--git-email <email>', 'Git user email for commits in sandbox (default: auto-detect from local git config)')
   .option('--ssh-key <path>', 'Path to SSH private key for private repository access (e.g., ~/.ssh/id_ed25519)')
   .option('--confirm-ssh-key', 'Skip interactive SSH key security warning (for non-interactive use)')
+  .option('--npm-token <token>', 'NPM authentication token for private packages (or set PARALLEL_CC_NPM_TOKEN env var)')
+  .option('--npm-registry <url>', 'Custom NPM registry URL (default: https://registry.npmjs.org)', 'https://registry.npmjs.org')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1728,6 +1740,37 @@ Examples:
           console.log(chalk.green(`✓ SSH key injected (${injectionResult.keyType || 'unknown'} type)`));
           if (injectionResult.keyFingerprint) {
             console.log(chalk.dim(`  Fingerprint: ${injectionResult.keyFingerprint}`));
+          }
+        }
+      }
+
+      // Configure NPM authentication if token provided
+      // Priority: CLI flag > environment variable
+      const npmToken = options.npmToken || process.env.PARALLEL_CC_NPM_TOKEN;
+      if (npmToken) {
+        if (!options.json) {
+          console.log(chalk.dim('  Configuring NPM authentication for private packages...'));
+        }
+
+        const npmConfigResult = await sandboxManager.configureNpmAuth(
+          sandbox,
+          npmToken,
+          options.npmRegistry
+        );
+
+        if (npmConfigResult) {
+          if (!options.json) {
+            console.log(chalk.green('✓ NPM authentication configured'));
+            // Don't log the registry URL if it's the default
+            if (options.npmRegistry !== 'https://registry.npmjs.org') {
+              console.log(chalk.dim(`  Registry: ${options.npmRegistry}`));
+            }
+          }
+        } else {
+          // NPM config failure is non-blocking - warn but continue
+          if (!options.json) {
+            console.warn(chalk.yellow('⚠ NPM authentication configuration failed'));
+            console.warn(chalk.dim('  Continuing without private package access'));
           }
         }
       }
