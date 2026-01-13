@@ -1481,7 +1481,7 @@ Examples:
       if ((hasGitUser && !hasGitEmail) || (!hasGitUser && hasGitEmail)) {
         if (!options.json) {
           console.warn(chalk.yellow('⚠ Warning: Both --git-user and --git-email should be provided together'));
-          console.warn(chalk.dim('  Partial configuration will be ignored, using auto-detection or defaults'));
+        console.warn(chalk.dim('  Using the provided value; the missing one will be auto-detected/defaulted'));
         }
       }
 
