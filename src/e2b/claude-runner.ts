@@ -1091,8 +1091,8 @@ function isAlreadyUpToDate(output: string): boolean {
 function parseVersion(output: string): string | null {
   // Try various version patterns
   const patterns = [
-    /version\s+([\d.]+)/i,
-    /v([\d.]+)/i,
+    /version\s+(\d+\.\d+\.\d+)/i,
+    /v(\d+\.\d+\.\d+)/i,
     /^([\d]+\.[\d]+\.[\d]+)$/m
   ];
 
