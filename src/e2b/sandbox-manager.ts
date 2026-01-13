@@ -605,21 +605,22 @@ export class SandboxManager {
         this.logger.warn('Using HTTP for NPM registry is insecure. Consider using HTTPS.');
       }
 
-      // Build registry hostname (including port if present, and path if present)
-      let registryHost = parsedUrl.host; // includes port if specified
-      if (parsedUrl.pathname && parsedUrl.pathname !== '/') {
-        // Remove trailing slash from pathname for consistent format
-        const cleanPath = parsedUrl.pathname.replace(/\/$/, '');
-        registryHost += cleanPath;
-      }
+      // Build normalized registry (origin + optional path) without query/fragment
+      // This ensures auth scope and registry= line use the same normalized value
+      const cleanPath = parsedUrl.pathname && parsedUrl.pathname !== '/'
+        ? parsedUrl.pathname.replace(/\/$/, '')
+        : '';
+      const registryHost = parsedUrl.host + cleanPath;
+      const normalizedRegistry = `${parsedUrl.protocol}//${registryHost}`;
 
       // Build .npmrc content
+      // Use function replacement to avoid $ character interpretation in registryHost
       const npmrcContent = [
         `//registry.npmjs.org/:_authToken=${sanitizedToken}`.replace(
           'registry.npmjs.org',
-          registryHost
+          () => registryHost
         ),
-        `registry=${npmRegistry.replace(/\/$/, '')}`  // Remove trailing slash
+        `registry=${normalizedRegistry}`
       ].join('\n') + '\n';
 
       // Write .npmrc file

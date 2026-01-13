@@ -406,6 +406,53 @@ describe('NPM Configuration for E2B Sandboxes', () => {
       );
     });
 
+    it('should handle registry hostname with $ character', async () => {
+      const { SandboxManager } = await import('../../src/e2b/sandbox-manager.js');
+      const manager = new SandboxManager(mockLogger as any);
+
+      // Registry with $ in path (edge case for String.replace)
+      const result = await manager.configureNpmAuth(
+        mockSandbox as Sandbox,
+        'npm_token',
+        'https://registry.example.com/$npm'
+      );
+
+      expect(result).toBe(true);
+      // Verify $ is preserved literally, not interpreted as replacement pattern
+      expect(mockSandbox.files.write).toHaveBeenCalledWith(
+        '/root/.npmrc',
+        expect.stringContaining('//registry.example.com/$npm/:_authToken=')
+      );
+    });
+
+    it('should strip query and fragment from registry URL', async () => {
+      const { SandboxManager } = await import('../../src/e2b/sandbox-manager.js');
+      const manager = new SandboxManager(mockLogger as any);
+
+      // Registry URL with query and fragment (should be stripped)
+      const result = await manager.configureNpmAuth(
+        mockSandbox as Sandbox,
+        'npm_token',
+        'https://registry.example.com/npm?foo=bar#section'
+      );
+
+      expect(result).toBe(true);
+      // Auth scope should not contain query/fragment
+      expect(mockSandbox.files.write).toHaveBeenCalledWith(
+        '/root/.npmrc',
+        expect.stringContaining('//registry.example.com/npm/:_authToken=')
+      );
+      // registry= line should also be normalized
+      expect(mockSandbox.files.write).toHaveBeenCalledWith(
+        '/root/.npmrc',
+        expect.stringContaining('registry=https://registry.example.com/npm')
+      );
+      // Should NOT contain query or fragment
+      const writeCall = mockSandbox.files.write.mock.calls[0];
+      expect(writeCall[1]).not.toContain('?foo=bar');
+      expect(writeCall[1]).not.toContain('#section');
+    });
+
     it('should handle token with newlines (sanitization)', async () => {
       const { SandboxManager } = await import('../../src/e2b/sandbox-manager.js');
       const manager = new SandboxManager(mockLogger as any);
