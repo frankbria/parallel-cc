@@ -1361,6 +1361,13 @@ Branch Management:
   --branch auto           Auto-generate branch name and commit (convenience)
   --branch <name>         Specify branch name and commit (custom naming)
 
+Git Identity (for commits in sandbox):
+  (default)               Auto-detect from local git config
+  --git-user "Name"       Override git user name
+  --git-email "email"     Override git user email
+  PARALLEL_CC_GIT_USER    Environment variable fallback
+  PARALLEL_CC_GIT_EMAIL   Environment variable fallback
+
 Examples:
   # Default: uncommitted changes, review before committing
   parallel-cc sandbox-run --repo . --prompt "Fix bug"
@@ -1369,7 +1376,10 @@ Examples:
   parallel-cc sandbox-run --repo . --prompt "Add feature" --auth-method oauth --branch auto
 
   # Custom branch name
-  parallel-cc sandbox-run --repo . --prompt "Fix #42" --branch feature/issue-42`)
+  parallel-cc sandbox-run --repo . --prompt "Fix #42" --branch feature/issue-42
+
+  # Override git identity for commits
+  parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-user "CI Bot" --git-email "ci@example.com"`)
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
@@ -1379,6 +1389,8 @@ Examples:
   .option('--branch <name>', 'Create feature branch for changes: "auto" (auto-generate name) or specify branch name. Default: no branch, uncommitted changes')
   .option('--git-live', 'Push results to remote feature branch and create PR instead of downloading (requires GITHUB_TOKEN)')
   .option('--target-branch <branch>', 'Target branch for PR when using --git-live (default: main)', 'main')
+  .option('--git-user <name>', 'Git user name for commits in sandbox (default: auto-detect from local git config)')
+  .option('--git-email <email>', 'Git user email for commits in sandbox (default: auto-detect from local git config)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1460,6 +1472,16 @@ Examples:
             console.error(chalk.dim('  Create a token at: https://github.com/settings/tokens'));
           }
           process.exit(1);
+        }
+      }
+
+      // Warn about partial git identity configuration
+      const hasGitUser = options.gitUser && options.gitUser.trim();
+      const hasGitEmail = options.gitEmail && options.gitEmail.trim();
+      if ((hasGitUser && !hasGitEmail) || (!hasGitUser && hasGitEmail)) {
+        if (!options.json) {
+          console.warn(chalk.yellow('⚠ Warning: Both --git-user and --git-email should be provided together'));
+          console.warn(chalk.dim('  Partial configuration will be ignored, using auto-detection or defaults'));
         }
       }
 
@@ -1687,7 +1709,10 @@ Examples:
             }
           },
           authMethod: options.authMethod as 'api-key' | 'oauth',
-          oauthCredentials
+          oauthCredentials,
+          gitUser: options.gitUser,
+          gitEmail: options.gitEmail,
+          localRepoPath: repoPath
         }
       );
 
