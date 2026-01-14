@@ -1411,38 +1411,40 @@ Examples:
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
-    const templateManager = new TemplateManager();
-    let managedTemplate: import('./types.js').SandboxTemplate | null = null;
-
-    // Load managed template if --use-template is specified
-    if (options.useTemplate) {
-      managedTemplate = await templateManager.getTemplate(options.useTemplate);
-      if (!managedTemplate) {
-        if (options.json) {
-          console.log(JSON.stringify({
-            success: false,
-            error: `Template "${options.useTemplate}" not found`,
-            hint: 'Run "parallel-cc templates list" to see available templates'
-          }));
-        } else {
-          console.error(chalk.red(`✗ Template "${options.useTemplate}" not found`));
-          console.log(chalk.dim('Run "parallel-cc templates list" to see available templates'));
-        }
-        process.exit(1);
-      }
-    }
-
-    // Precedence: --use-template > --template > E2B_TEMPLATE env var > default
-    const sandboxImage = managedTemplate?.e2bTemplate ||
-                         options.template ||
-                         (process.env.E2B_TEMPLATE?.trim() || '') ||
-                         'anthropic-claude-code';
-    const sandboxManager = new SandboxManager(logger, {
-      sandboxImage
-    });
     let sandboxId: string | null = null;
+    let sandboxManager: SandboxManager | null = null;
 
     try {
+      const templateManager = new TemplateManager();
+      let managedTemplate: import('./types.js').SandboxTemplate | null = null;
+
+      // Load managed template if --use-template is specified
+      if (options.useTemplate) {
+        managedTemplate = await templateManager.getTemplate(options.useTemplate);
+        if (!managedTemplate) {
+          if (options.json) {
+            console.log(JSON.stringify({
+              success: false,
+              error: `Template "${options.useTemplate}" not found`,
+              hint: 'Run "parallel-cc templates list" to see available templates'
+            }));
+          } else {
+            console.error(chalk.red(`✗ Template "${options.useTemplate}" not found`));
+            console.log(chalk.dim('Run "parallel-cc templates list" to see available templates'));
+          }
+          process.exit(1);
+        }
+      }
+
+      // Precedence: --use-template > --template > E2B_TEMPLATE env var > default
+      const sandboxImage = managedTemplate?.e2bTemplate ||
+                           options.template ||
+                           (process.env.E2B_TEMPLATE?.trim() || '') ||
+                           'anthropic-claude-code';
+      sandboxManager = new SandboxManager(logger, {
+        sandboxImage
+      });
+
       // Check schema version - E2B features require v1.0.0 migration
       const db = coordinator['db'];
       const currentVersion = db.getSchemaVersion();
@@ -2128,7 +2130,7 @@ Examples:
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       // Best-effort sandbox cleanup on error
-      if (sandboxId) {
+      if (sandboxId && sandboxManager) {
         try {
           await sandboxManager.terminateSandbox(sandboxId);
         } catch (cleanupError) {
@@ -2618,8 +2620,19 @@ templatesCmd
   .command('show <name>')
   .description('Show detailed template information')
   .option('--json', 'Output as JSON')
+  .option('--show-secrets', 'Show sensitive environment variable values (hidden by default)')
   .action(async (name: string, options) => {
     const templateManager = new TemplateManager();
+
+    // Pattern to detect sensitive environment variable names
+    const sensitiveKeyPattern = /token|key|secret|password|credential|auth/i;
+    const isSensitiveKey = (key: string): boolean => sensitiveKeyPattern.test(key);
+    const redactValue = (key: string, value: string): string => {
+      if (options.showSecrets || !isSensitiveKey(key)) {
+        return value;
+      }
+      return '********';
+    };
 
     try {
       const template = await templateManager.getTemplate(name);
@@ -2635,7 +2648,14 @@ templatesCmd
       }
 
       if (options.json) {
-        console.log(JSON.stringify({ success: true, template }, null, 2));
+        // Redact sensitive values in JSON output too
+        const safeTemplate = { ...template };
+        if (safeTemplate.environment) {
+          safeTemplate.environment = Object.fromEntries(
+            Object.entries(safeTemplate.environment).map(([key, value]) => [key, redactValue(key, value)])
+          );
+        }
+        console.log(JSON.stringify({ success: true, template: safeTemplate }, null, 2));
       } else {
         const isBuiltIn = await templateManager.isBuiltInTemplate(name);
         console.log(chalk.bold(`Template: ${template.name}`));
@@ -2653,7 +2673,14 @@ templatesCmd
         if (template.environment && Object.keys(template.environment).length > 0) {
           console.log('\nEnvironment Variables:');
           for (const [key, value] of Object.entries(template.environment)) {
-            console.log(chalk.cyan(`  ${key}=${value}`));
+            const displayValue = redactValue(key, value);
+            console.log(chalk.cyan(`  ${key}=${displayValue}`));
+          }
+          if (!options.showSecrets) {
+            const hasSensitive = Object.keys(template.environment).some(isSensitiveKey);
+            if (hasSensitive) {
+              console.log(chalk.dim('  (Use --show-secrets to reveal sensitive values)'));
+            }
           }
         }
 
@@ -2708,14 +2735,38 @@ templatesCmd
         process.exit(1);
       }
 
-      // Parse environment variables
+      // Parse environment variables with validation
       const environment: Record<string, string> = {};
       if (options.env) {
         for (const envVar of options.env) {
-          const [key, ...valueParts] = envVar.split('=');
-          if (key && valueParts.length > 0) {
-            environment[key] = valueParts.join('=');
+          const equalsIndex = envVar.indexOf('=');
+          if (equalsIndex === -1) {
+            if (options.json) {
+              console.log(JSON.stringify({
+                success: false,
+                error: `Invalid --env format: "${envVar}" (must be KEY=value)`
+              }));
+            } else {
+              console.error(chalk.red(`✗ Invalid --env format: "${envVar}"`));
+              console.log(chalk.dim('Environment variables must be in KEY=value format'));
+            }
+            process.exit(1);
           }
+          const key = envVar.substring(0, equalsIndex);
+          const value = envVar.substring(equalsIndex + 1);
+          if (!key) {
+            if (options.json) {
+              console.log(JSON.stringify({
+                success: false,
+                error: `Invalid --env format: "${envVar}" (key cannot be empty)`
+              }));
+            } else {
+              console.error(chalk.red(`✗ Invalid --env format: "${envVar}"`));
+              console.log(chalk.dim('Environment variable key cannot be empty'));
+            }
+            process.exit(1);
+          }
+          environment[key] = value;
         }
       }
 
