@@ -706,48 +706,25 @@ export class SandboxManager {
       this.logger.info(`Applying template "${template.name}" to sandbox ${sandboxId}`);
 
       let commandsExecuted = 0;
-      let environmentVarsSet = 0;
+      const environmentVarsSet = template.environment ? Object.keys(template.environment).length : 0;
 
-      // Set environment variables first
-      if (template.environment && Object.keys(template.environment).length > 0) {
-        const envExports = Object.entries(template.environment)
-          .map(([key, value]) => `export ${key}="${value}"`)
-          .join(' && ');
+      // Prepare environment variables for commands.run() envs parameter
+      // This ensures env vars persist across all commands (unlike shell exports)
+      const envs = template.environment || {};
 
-        this.logger.info(`Setting ${Object.keys(template.environment).length} environment variables`);
-
-        try {
-          const result = await sandbox.commands.run(envExports, {
-            timeoutMs: 30000 // 30 second timeout for env setup
-          });
-
-          if (result.exitCode !== 0) {
-            return {
-              success: false,
-              message: 'Template application failed',
-              error: `Failed to set environment variables: ${result.stderr}`
-            };
-          }
-
-          environmentVarsSet = Object.keys(template.environment).length;
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          return {
-            success: false,
-            message: 'Template application failed',
-            error: `Failed to set environment variables: ${errorMsg}`
-          };
-        }
+      if (environmentVarsSet > 0) {
+        this.logger.info(`Configuring ${environmentVarsSet} environment variables via envs parameter`);
       }
 
-      // Execute setup commands sequentially
+      // Execute setup commands sequentially with environment variables
       if (template.setupCommands && template.setupCommands.length > 0) {
         for (const command of template.setupCommands) {
           this.logger.info(`Executing setup command: ${command}`);
 
           try {
             const result = await sandbox.commands.run(command, {
-              timeoutMs: 300000 // 5 minute timeout per command
+              timeoutMs: 300000, // 5 minute timeout per command
+              envs // Pass env vars to each command
             });
 
             if (result.exitCode !== 0) {

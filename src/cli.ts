@@ -1396,7 +1396,7 @@ Examples:
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
   .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code or E2B_TEMPLATE env var)')
-  .option('--use-template <name>', 'Use managed template from templates-list (runs setup commands and sets environment)')
+  .option('--use-template <name>', 'Use managed template from templates list (runs setup commands and sets environment)')
   .option('--auth-method <method>', 'Authentication method: api-key (ANTHROPIC_API_KEY env var) or oauth (Claude subscription credentials)', 'api-key')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
   .option('--branch <name>', 'Create feature branch for changes: "auto" (auto-generate name) or specify branch name. Default: no branch, uncommitted changes')
@@ -1422,11 +1422,11 @@ Examples:
           console.log(JSON.stringify({
             success: false,
             error: `Template "${options.useTemplate}" not found`,
-            hint: 'Run "parallel-cc templates-list" to see available templates'
+            hint: 'Run "parallel-cc templates list" to see available templates'
           }));
         } else {
           console.error(chalk.red(`✗ Template "${options.useTemplate}" not found`));
-          console.log(chalk.dim('Run "parallel-cc templates-list" to see available templates'));
+          console.log(chalk.dim('Run "parallel-cc templates list" to see available templates'));
         }
         process.exit(1);
       }
@@ -1802,26 +1802,26 @@ Examples:
       // Apply managed template (setup commands and environment variables)
       if (managedTemplate) {
         if (!options.json) {
-          console.log(chalk.dim(`  Applying template "${managedTemplate.name}"...`));
+          logger.info(chalk.dim(`  Applying template "${managedTemplate.name}"...`));
         }
 
         const templateResult = await sandboxManager.applyTemplate(sandboxId, managedTemplate);
 
         if (templateResult.success) {
           if (!options.json) {
-            console.log(chalk.green(`✓ Template "${managedTemplate.name}" applied`));
+            logger.info(chalk.green(`✓ Template "${managedTemplate.name}" applied`));
             if (templateResult.commandsExecuted && templateResult.commandsExecuted > 0) {
-              console.log(chalk.dim(`  Setup commands: ${templateResult.commandsExecuted}`));
+              logger.info(chalk.dim(`  Setup commands: ${templateResult.commandsExecuted}`));
             }
             if (templateResult.environmentVarsSet && templateResult.environmentVarsSet > 0) {
-              console.log(chalk.dim(`  Environment variables: ${templateResult.environmentVarsSet}`));
+              logger.info(chalk.dim(`  Environment variables: ${templateResult.environmentVarsSet}`));
             }
           }
         } else {
           // Template application failure is non-blocking - warn but continue
           if (!options.json) {
-            console.warn(chalk.yellow(`⚠ Template application failed: ${templateResult.error}`));
-            console.warn(chalk.dim('  Continuing without template setup'));
+            logger.warn(chalk.yellow(`⚠ Template application failed: ${templateResult.error}`));
+            logger.warn(chalk.dim('  Continuing without template setup'));
           }
         }
       }
@@ -2699,11 +2699,11 @@ templatesCmd
         if (options.json) {
           console.log(JSON.stringify({
             success: false,
-            error: 'Invalid template name: must be 3-50 alphanumeric characters, hyphens, or underscores'
+            error: 'Invalid template name: must be 3-50 alphanumeric characters, hyphens, underscores, or dots'
           }));
         } else {
           console.error(chalk.red('✗ Invalid template name'));
-          console.log(chalk.dim('Name must be 3-50 alphanumeric characters, hyphens, or underscores'));
+          console.log(chalk.dim('Name must be 3-50 alphanumeric characters, hyphens, underscores, or dots'));
         }
         process.exit(1);
       }
@@ -2782,6 +2782,17 @@ templatesCmd
           console.log(JSON.stringify({ success: false, error: `Cannot delete built-in template "${name}"` }));
         } else {
           console.error(chalk.red(`✗ Cannot delete built-in template "${name}"`));
+        }
+        process.exit(1);
+      }
+
+      // Verify template exists before prompting for confirmation
+      const template = await templateManager.getTemplate(name);
+      if (!template) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: `Template "${name}" not found` }));
+        } else {
+          console.error(chalk.red(`✗ Template "${name}" not found`));
         }
         process.exit(1);
       }
@@ -2884,6 +2895,9 @@ templatesCmd
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
+        if (!result.success) {
+          process.exit(1);
+        }
       } else {
         if (result.success) {
           console.log(chalk.green(`✓ ${result.message}`));

@@ -940,16 +940,20 @@ describe('SandboxManager', () => {
         name: 'test-template',
         description: 'Test',
         e2bTemplate: 'base',
+        setupCommands: ['echo test'], // Need a command to verify envs are passed
         environment: { NODE_ENV: 'development', DEBUG: 'true' }
       };
 
       const result = await manager.applyTemplate('test-sandbox-123', template);
 
       expect(result.success).toBe(true);
-      // Environment variables should be exported
+      expect(result.environmentVarsSet).toBe(2);
+      // Environment variables should be passed via envs parameter (not shell exports)
       expect(mockSandbox.commands.run).toHaveBeenCalledWith(
-        expect.stringContaining('export NODE_ENV'),
-        expect.any(Object)
+        'echo test',
+        expect.objectContaining({
+          envs: { NODE_ENV: 'development', DEBUG: 'true' }
+        })
       );
     });
 
