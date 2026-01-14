@@ -1,0 +1,19 @@
+{
+  "name": "node-20-typescript",
+  "description": "Node.js 20 LTS with TypeScript, ESLint, Prettier",
+  "e2bTemplate": "anthropic-claude-code",
+  "setupCommands": [
+    "npm install -g typescript@latest eslint@latest prettier@latest",
+    "npm install"
+  ],
+  "environment": {
+    "NODE_ENV": "development",
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  },
+  "metadata": {
+    "author": "parallel-cc",
+    "version": "1.0.0",
+    "tags": ["node", "typescript", "linting"],
+    "createdAt": "2025-01-13T00:00:00Z"
+  }
+}
