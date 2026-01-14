@@ -2555,9 +2555,12 @@ program
 // Template Commands (v1.1)
 // ============================================================================
 
-program
-  .command('templates-list')
-  .alias('tpl-list')
+const templatesCmd = program
+  .command('templates')
+  .description('Manage sandbox templates for common workflows (v1.1)');
+
+templatesCmd
+  .command('list')
   .description('List all available sandbox templates')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
@@ -2611,9 +2614,8 @@ program
     }
   });
 
-program
-  .command('templates-show <name>')
-  .alias('tpl-show')
+templatesCmd
+  .command('show <name>')
   .description('Show detailed template information')
   .option('--json', 'Output as JSON')
   .action(async (name: string, options) => {
@@ -2679,9 +2681,8 @@ program
     }
   });
 
-program
-  .command('templates-create <name>')
-  .alias('tpl-create')
+templatesCmd
+  .command('create <name>')
   .description('Create a new custom template')
   .requiredOption('--description <text>', 'Template description')
   .option('--e2b-template <name>', 'E2B base template (default: anthropic-claude-code)', 'anthropic-claude-code')
@@ -2765,9 +2766,8 @@ program
     }
   });
 
-program
-  .command('templates-delete <name>')
-  .alias('tpl-delete')
+templatesCmd
+  .command('delete <name>')
   .description('Delete a custom template')
   .option('--force', 'Skip confirmation prompt')
   .option('--json', 'Output as JSON')
@@ -2818,9 +2818,8 @@ program
     }
   });
 
-program
-  .command('templates-export <name>')
-  .alias('tpl-export')
+templatesCmd
+  .command('export <name>')
   .description('Export a template to JSON')
   .option('--output <file>', 'Write to file instead of stdout')
   .action(async (name: string, options) => {
@@ -2849,9 +2848,8 @@ program
     }
   });
 
-program
-  .command('templates-import')
-  .alias('tpl-import')
+templatesCmd
+  .command('import')
   .description('Import a template from JSON')
   .option('--file <path>', 'Read from file instead of stdin')
   .option('--json', 'Output as JSON')

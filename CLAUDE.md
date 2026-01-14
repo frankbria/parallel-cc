@@ -348,12 +348,12 @@ CREATE INDEX idx_subscriptions_active ON subscriptions(is_active);
 | `install --mcp` | Configure MCP server in Claude settings |
 | `install --uninstall` | Remove installed hooks/alias/MCP |
 | `install --status` | Check installation status |
-| `templates-list` | List all available sandbox templates (v1.1) |
-| `templates-show <name>` | Show detailed template information (v1.1) |
-| `templates-create <name>` | Create a new custom template (v1.1) |
-| `templates-delete <name>` | Delete a custom template (v1.1) |
-| `templates-export <name>` | Export a template to JSON (v1.1) |
-| `templates-import` | Import a template from JSON (v1.1) |
+| `templates list` | List all available sandbox templates (v1.1) |
+| `templates show <name>` | Show detailed template information (v1.1) |
+| `templates create <name>` | Create a new custom template (v1.1) |
+| `templates delete <name>` | Delete a custom template (v1.1) |
+| `templates export <name>` | Export a template to JSON (v1.1) |
+| `templates import` | Import a template from JSON (v1.1) |
 
 ## MCP Server Tools (v0.4)
 
@@ -551,20 +551,20 @@ Pre-configured development environments that automatically set up tools and depe
 **Template Commands:**
 ```bash
 # List available templates
-parallel-cc templates-list
+parallel-cc templates list
 
 # Show template details
-parallel-cc templates-show node-20-typescript
+parallel-cc templates show node-20-typescript
 
 # Create custom template
-parallel-cc templates-create my-template --description "My setup" --setup-commands "npm install" --env NODE_ENV=development
+parallel-cc templates create my-template --description "My setup" --setup-commands "npm install" --env NODE_ENV=development
 
 # Create from project detection
-parallel-cc templates-create my-project-template --description "Auto-detected" --from-repo .
+parallel-cc templates create my-project-template --description "Auto-detected" --from-repo .
 
 # Export/import for sharing
-parallel-cc templates-export my-template --output template.json
-parallel-cc templates-import --file template.json
+parallel-cc templates export my-template --output template.json
+parallel-cc templates import --file template.json
 ```
 
 ### Authentication
@@ -942,3 +942,11 @@ src/e2b/
 - Meaningful variable names
 - Vitest for unit testing
 - >85% test coverage enforced
+
+### CLI Naming Convention
+
+Prefer proper subcommands over hyphenated command names:
+- **Preferred:** `parallel-cc templates list`, `parallel-cc templates show <name>`
+- **Avoid:** `parallel-cc templates-list`, `parallel-cc templates-show <name>`
+
+Use hyphens only when it makes sense semantically (e.g., `sandbox-run` as a single action) or to maintain backward compatibility with existing commands.
