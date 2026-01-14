@@ -112,10 +112,23 @@ src/
 ├── confidence-scorer.ts # Confidence scoring for suggestions (v0.5)
 ├── merge-strategies.ts # Conflict resolution strategies (v0.5)
 ├── types.ts            # TypeScript type definitions
-└── mcp/                # MCP server module (v0.5)
-    ├── index.ts        # Server setup and tool registration
-    ├── tools.ts        # Tool implementations (16 tools)
-    └── schemas.ts      # Zod schemas for inputs/outputs
+├── mcp/                # MCP server module (v0.5)
+│   ├── index.ts        # Server setup and tool registration
+│   ├── tools.ts        # Tool implementations (16 tools)
+│   └── schemas.ts      # Zod schemas for inputs/outputs
+└── e2b/                # E2B sandbox module (v1.0-v1.1)
+    ├── sandbox-manager.ts    # E2B sandbox lifecycle management
+    ├── file-sync.ts          # Upload/download with compression
+    ├── claude-runner.ts      # Autonomous Claude execution
+    ├── output-monitor.ts     # Real-time output streaming
+    ├── ssh-key-injector.ts   # SSH key injection for private repos (v1.1)
+    ├── git-live.ts           # Push to remote + PR creation
+    └── templates.ts          # Template management for sandbox environments (v1.1)
+
+templates/              # Built-in sandbox templates (v1.1)
+├── node-20-typescript.json   # Node.js TypeScript development
+├── python-3.12-fastapi.json  # Python FastAPI development
+└── full-stack-nextjs.json    # Next.js full-stack development
 
 scripts/
 ├── claude-parallel.sh  # Wrapper script (main entry point for users)
@@ -136,10 +149,9 @@ tests/
 ├── merge-strategies.basic.test.ts  # Merge strategies tests (v0.5)
 ├── logger-redaction.test.ts        # Sensitive data redaction tests (v1.1)
 ├── e2b/ssh-key-injector.test.ts    # SSH key injection tests (v1.1)
+├── e2b/templates.test.ts           # Template management tests (v1.1)
 ├── integration.test.ts             # End-to-end integration tests (v0.5)
 └── mcp-tools-smoke.test.ts         # MCP tools smoke tests (v0.5)
-
-Total: 507 tests (441 + 66 new), 100% passing, 87.5% function coverage
 
 vitest.config.ts  # Test framework configuration (project root)
 ```
@@ -160,6 +172,7 @@ vitest.config.ts  # Test framework configuration (project root)
 12. **E2B Sandbox Execution** - Autonomous Claude Code execution in isolated cloud VMs (v1.0)
 13. **Plan-Driven Workflows** - Execute implementation plans (PLAN.md) autonomously in sandboxes (v1.0)
 14. **File Sync** - Intelligent upload/download with compression and selective sync (v1.0)
+15. **Sandbox Templates** - Pre-configured development environments for Node.js, Python, and Next.js (v1.1)
 
 ## Development Commands
 
@@ -335,6 +348,12 @@ CREATE INDEX idx_subscriptions_active ON subscriptions(is_active);
 | `install --mcp` | Configure MCP server in Claude settings |
 | `install --uninstall` | Remove installed hooks/alias/MCP |
 | `install --status` | Check installation status |
+| `templates-list` | List all available sandbox templates (v1.1) |
+| `templates-show <name>` | Show detailed template information (v1.1) |
+| `templates-create <name>` | Create a new custom template (v1.1) |
+| `templates-delete <name>` | Delete a custom template (v1.1) |
+| `templates-export <name>` | Export a template to JSON (v1.1) |
+| `templates-import` | Import a template from JSON (v1.1) |
 
 ## MCP Server Tools (v0.4)
 
@@ -413,7 +432,8 @@ Get history of detected merge events for a repository.
 | v0.3 | ✅ Complete | MCP server, >85% test coverage |
 | v0.4 | ✅ Complete | Branch merge detection, rebase assistance, conflict checking |
 | v0.5 | ✅ Complete | File claims, AST conflict detection, AI auto-fix, 441 tests (100%) |
-| v1.0 | ✅ Current | E2B sandbox integration for autonomous execution |
+| v1.0 | ✅ Complete | E2B sandbox integration for autonomous execution |
+| v1.1 | ✅ Current | Sandbox templates for Node.js, Python, Next.js; project type detection |
 
 ## E2B Sandbox Integration (v1.0)
 
@@ -510,6 +530,41 @@ parallel-cc sandbox-kill --session-id <id>
 
 # Test setup without execution
 parallel-cc sandbox-run --dry-run --repo .
+
+# Use managed templates (v1.1)
+parallel-cc sandbox-run --repo . --prompt "Build feature" --use-template node-20-typescript
+parallel-cc sandbox-run --repo . --prompt "Develop API" --use-template python-3.12-fastapi
+parallel-cc sandbox-run --repo . --prompt "Create page" --use-template full-stack-nextjs
+```
+
+### Sandbox Templates (v1.1)
+
+Pre-configured development environments that automatically set up tools and dependencies:
+
+**Built-in Templates:**
+| Template | Description | Setup |
+|----------|-------------|-------|
+| `node-20-typescript` | Node.js 20 with TypeScript tooling | TypeScript, ESLint, Prettier + npm install |
+| `python-3.12-fastapi` | Python FastAPI development | FastAPI, uvicorn, pytest, ruff, mypy |
+| `full-stack-nextjs` | Next.js with Playwright testing | Next.js, Tailwind, Playwright browsers |
+
+**Template Commands:**
+```bash
+# List available templates
+parallel-cc templates-list
+
+# Show template details
+parallel-cc templates-show node-20-typescript
+
+# Create custom template
+parallel-cc templates-create my-template --description "My setup" --setup-commands "npm install" --env NODE_ENV=development
+
+# Create from project detection
+parallel-cc templates-create my-project-template --description "Auto-detected" --from-repo .
+
+# Export/import for sharing
+parallel-cc templates-export my-template --output template.json
+parallel-cc templates-import --file template.json
 ```
 
 ### Authentication

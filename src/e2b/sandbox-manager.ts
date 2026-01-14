@@ -14,8 +14,20 @@ import {
   type E2BSessionConfig,
   type SandboxHealthCheck,
   type SandboxTerminationResult,
-  type TimeoutWarning
+  type TimeoutWarning,
+  type SandboxTemplate
 } from '../types.js';
+
+/**
+ * Result of template application
+ */
+export interface TemplateApplicationResult {
+  success: boolean;
+  message: string;
+  commandsExecuted?: number;
+  environmentVarsSet?: number;
+  error?: string;
+}
 
 // Default configuration
 const envTemplate = process.env.E2B_TEMPLATE?.trim();
@@ -664,6 +676,124 @@ export class SandboxManager {
     const failed = results.filter(r => r.status === 'rejected');
     if (failed.length > 0) {
       this.logger.error(`Failed to cleanup ${failed.length} sandboxes during shutdown`);
+    }
+  }
+
+  /**
+   * Apply a template to a sandbox
+   *
+   * This method executes the template's setup commands and sets environment
+   * variables in the sandbox. It should be called after sandbox creation.
+   *
+   * @param sandboxId - Sandbox ID to apply template to
+   * @param template - Template definition with setup commands and environment
+   * @returns Result of template application
+   */
+  async applyTemplate(
+    sandboxId: string,
+    template: SandboxTemplate
+  ): Promise<TemplateApplicationResult> {
+    try {
+      const sandbox = this.activeSandboxes.get(sandboxId);
+      if (!sandbox) {
+        return {
+          success: false,
+          message: 'Template application failed',
+          error: `Sandbox ${sandboxId} not found in active sandboxes`
+        };
+      }
+
+      this.logger.info(`Applying template "${template.name}" to sandbox ${sandboxId}`);
+
+      let commandsExecuted = 0;
+      let environmentVarsSet = 0;
+
+      // Set environment variables first
+      if (template.environment && Object.keys(template.environment).length > 0) {
+        const envExports = Object.entries(template.environment)
+          .map(([key, value]) => `export ${key}="${value}"`)
+          .join(' && ');
+
+        this.logger.info(`Setting ${Object.keys(template.environment).length} environment variables`);
+
+        try {
+          const result = await sandbox.commands.run(envExports, {
+            timeoutMs: 30000 // 30 second timeout for env setup
+          });
+
+          if (result.exitCode !== 0) {
+            return {
+              success: false,
+              message: 'Template application failed',
+              error: `Failed to set environment variables: ${result.stderr}`
+            };
+          }
+
+          environmentVarsSet = Object.keys(template.environment).length;
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          return {
+            success: false,
+            message: 'Template application failed',
+            error: `Failed to set environment variables: ${errorMsg}`
+          };
+        }
+      }
+
+      // Execute setup commands sequentially
+      if (template.setupCommands && template.setupCommands.length > 0) {
+        for (const command of template.setupCommands) {
+          this.logger.info(`Executing setup command: ${command}`);
+
+          try {
+            const result = await sandbox.commands.run(command, {
+              timeoutMs: 300000 // 5 minute timeout per command
+            });
+
+            if (result.exitCode !== 0) {
+              return {
+                success: false,
+                message: 'Template application failed',
+                commandsExecuted,
+                environmentVarsSet,
+                error: `Setup command failed: "${command}" (exit code ${result.exitCode}): ${result.stderr}`
+              };
+            }
+
+            commandsExecuted++;
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            return {
+              success: false,
+              message: 'Template application failed',
+              commandsExecuted,
+              environmentVarsSet,
+              error: `Setup command failed: "${command}": ${errorMsg}`
+            };
+          }
+        }
+      }
+
+      this.logger.info(
+        `Template "${template.name}" applied successfully: ` +
+        `${commandsExecuted} commands, ${environmentVarsSet} env vars`
+      );
+
+      return {
+        success: true,
+        message: `Template "${template.name}" applied successfully`,
+        commandsExecuted,
+        environmentVarsSet
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to apply template: ${errorMsg}`);
+
+      return {
+        success: false,
+        message: 'Template application failed',
+        error: errorMsg
+      };
     }
   }
 }

@@ -1,0 +1,21 @@
+{
+  "name": "full-stack-nextjs",
+  "description": "Node.js 20 with Next.js 14+, Tailwind CSS, Playwright for E2E testing",
+  "e2bTemplate": "anthropic-claude-code",
+  "setupCommands": [
+    "npm install -g next@latest",
+    "npm install",
+    "npx playwright install --with-deps chromium"
+  ],
+  "environment": {
+    "NODE_ENV": "development",
+    "NEXT_TELEMETRY_DISABLED": "1",
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  },
+  "metadata": {
+    "author": "parallel-cc",
+    "version": "1.0.0",
+    "tags": ["nextjs", "react", "tailwind", "playwright", "fullstack"],
+    "createdAt": "2025-01-13T00:00:00Z"
+  }
+}

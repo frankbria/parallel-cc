@@ -1,0 +1,19 @@
+{
+  "name": "python-3.12-fastapi",
+  "description": "Python 3.12 with FastAPI, uvicorn, pytest, ruff, mypy",
+  "e2bTemplate": "anthropic-claude-code",
+  "setupCommands": [
+    "pip install --upgrade pip",
+    "pip install fastapi uvicorn pytest pytest-asyncio ruff mypy httpx"
+  ],
+  "environment": {
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "metadata": {
+    "author": "parallel-cc",
+    "version": "1.0.0",
+    "tags": ["python", "fastapi", "async", "testing"],
+    "createdAt": "2025-01-13T00:00:00Z"
+  }
+}

@@ -901,4 +901,120 @@ describe('SandboxManager', () => {
       expect(manager.getActiveSandboxIds()).toEqual([]);
     });
   });
+
+  describe('applyTemplate', () => {
+    beforeEach(async () => {
+      // Setup sandbox.commands.run mock
+      mockSandbox.commands = {
+        run: vi.fn().mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' })
+      };
+    });
+
+    it('should execute setup commands from template', async () => {
+      await manager.createSandbox('session-123');
+
+      const template = {
+        name: 'test-template',
+        description: 'Test',
+        e2bTemplate: 'base',
+        setupCommands: ['npm install', 'npm run build']
+      };
+
+      const result = await manager.applyTemplate('test-sandbox-123', template);
+
+      expect(result.success).toBe(true);
+      expect(mockSandbox.commands.run).toHaveBeenCalledTimes(2);
+      expect(mockSandbox.commands.run).toHaveBeenCalledWith('npm install', expect.any(Object));
+      expect(mockSandbox.commands.run).toHaveBeenCalledWith('npm run build', expect.any(Object));
+    });
+
+    it('should set environment variables from template', async () => {
+      // Setup environment setting mock
+      mockSandbox.commands.run.mockImplementation(async (cmd: string) => {
+        return { exitCode: 0, stdout: '', stderr: '' };
+      });
+
+      await manager.createSandbox('session-123');
+
+      const template = {
+        name: 'test-template',
+        description: 'Test',
+        e2bTemplate: 'base',
+        environment: { NODE_ENV: 'development', DEBUG: 'true' }
+      };
+
+      const result = await manager.applyTemplate('test-sandbox-123', template);
+
+      expect(result.success).toBe(true);
+      // Environment variables should be exported
+      expect(mockSandbox.commands.run).toHaveBeenCalledWith(
+        expect.stringContaining('export NODE_ENV'),
+        expect.any(Object)
+      );
+    });
+
+    it('should return error for nonexistent sandbox', async () => {
+      const template = {
+        name: 'test-template',
+        description: 'Test',
+        e2bTemplate: 'base'
+      };
+
+      const result = await manager.applyTemplate('nonexistent', template);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    it('should handle setup command failures', async () => {
+      mockSandbox.commands.run
+        .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'Installation failed' });
+
+      await manager.createSandbox('session-123');
+
+      const template = {
+        name: 'test-template',
+        description: 'Test',
+        e2bTemplate: 'base',
+        setupCommands: ['npm install']
+      };
+
+      const result = await manager.applyTemplate('test-sandbox-123', template);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('failed');
+    });
+
+    it('should skip template with no setup commands or environment', async () => {
+      await manager.createSandbox('session-123');
+
+      const template = {
+        name: 'minimal-template',
+        description: 'Minimal',
+        e2bTemplate: 'base'
+      };
+
+      const result = await manager.applyTemplate('test-sandbox-123', template);
+
+      expect(result.success).toBe(true);
+      expect(mockSandbox.commands.run).not.toHaveBeenCalled();
+    });
+
+    it('should log template application progress', async () => {
+      await manager.createSandbox('session-123');
+
+      const template = {
+        name: 'test-template',
+        description: 'Test',
+        e2bTemplate: 'base',
+        setupCommands: ['npm install']
+      };
+
+      await manager.applyTemplate('test-sandbox-123', template);
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Applying template')
+      );
+    });
+  });
 });

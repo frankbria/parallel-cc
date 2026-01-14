@@ -33,6 +33,7 @@ import { createTarball, uploadToSandbox, downloadChangedFiles, scanForCredential
 import { executeClaudeInSandbox } from './e2b/claude-runner.js';
 import { pushToRemoteAndCreatePR } from './e2b/git-live.js';
 import { validateSSHKeyPath, injectSSHKey, cleanupSSHKey, getSecurityWarning } from './e2b/ssh-key-injector.js';
+import { TemplateManager, validateTemplateName, validateTemplate } from './e2b/templates.js';
 import { logger } from './logger.js';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -1395,6 +1396,7 @@ Examples:
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
   .option('--template <image>', 'E2B sandbox template (default: anthropic-claude-code or E2B_TEMPLATE env var)')
+  .option('--use-template <name>', 'Use managed template from templates-list (runs setup commands and sets environment)')
   .option('--auth-method <method>', 'Authentication method: api-key (ANTHROPIC_API_KEY env var) or oauth (Claude subscription credentials)', 'api-key')
   .option('--dry-run', 'Test upload without execution (useful for verifying workspace)')
   .option('--branch <name>', 'Create feature branch for changes: "auto" (auto-generate name) or specify branch name. Default: no branch, uncommitted changes')
@@ -1409,8 +1411,30 @@ Examples:
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
-    // Precedence: CLI option > E2B_TEMPLATE env var > default 'anthropic-claude-code'
-    const sandboxImage = options.template ||
+    const templateManager = new TemplateManager();
+    let managedTemplate: import('./types.js').SandboxTemplate | null = null;
+
+    // Load managed template if --use-template is specified
+    if (options.useTemplate) {
+      managedTemplate = await templateManager.getTemplate(options.useTemplate);
+      if (!managedTemplate) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: `Template "${options.useTemplate}" not found`,
+            hint: 'Run "parallel-cc templates-list" to see available templates'
+          }));
+        } else {
+          console.error(chalk.red(`✗ Template "${options.useTemplate}" not found`));
+          console.log(chalk.dim('Run "parallel-cc templates-list" to see available templates'));
+        }
+        process.exit(1);
+      }
+    }
+
+    // Precedence: --use-template > --template > E2B_TEMPLATE env var > default
+    const sandboxImage = managedTemplate?.e2bTemplate ||
+                         options.template ||
                          (process.env.E2B_TEMPLATE?.trim() || '') ||
                          'anthropic-claude-code';
     const sandboxManager = new SandboxManager(logger, {
@@ -1771,6 +1795,33 @@ Examples:
           if (!options.json) {
             console.warn(chalk.yellow('⚠ NPM authentication configuration failed'));
             console.warn(chalk.dim('  Continuing without private package access'));
+          }
+        }
+      }
+
+      // Apply managed template (setup commands and environment variables)
+      if (managedTemplate) {
+        if (!options.json) {
+          console.log(chalk.dim(`  Applying template "${managedTemplate.name}"...`));
+        }
+
+        const templateResult = await sandboxManager.applyTemplate(sandboxId, managedTemplate);
+
+        if (templateResult.success) {
+          if (!options.json) {
+            console.log(chalk.green(`✓ Template "${managedTemplate.name}" applied`));
+            if (templateResult.commandsExecuted && templateResult.commandsExecuted > 0) {
+              console.log(chalk.dim(`  Setup commands: ${templateResult.commandsExecuted}`));
+            }
+            if (templateResult.environmentVarsSet && templateResult.environmentVarsSet > 0) {
+              console.log(chalk.dim(`  Environment variables: ${templateResult.environmentVarsSet}`));
+            }
+          }
+        } else {
+          // Template application failure is non-blocking - warn but continue
+          if (!options.json) {
+            console.warn(chalk.yellow(`⚠ Template application failed: ${templateResult.error}`));
+            console.warn(chalk.dim('  Continuing without template setup'));
           }
         }
       }
@@ -2497,6 +2548,360 @@ program
       process.exit(1);
     } finally {
       coordinator.close();
+    }
+  });
+
+// ============================================================================
+// Template Commands (v1.1)
+// ============================================================================
+
+program
+  .command('templates-list')
+  .alias('tpl-list')
+  .description('List all available sandbox templates')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const templateManager = new TemplateManager();
+
+    try {
+      const templates = await templateManager.listTemplates();
+
+      if (options.json) {
+        console.log(JSON.stringify({ success: true, templates }, null, 2));
+      } else {
+        if (templates.length === 0) {
+          console.log(chalk.yellow('No templates found.'));
+          console.log(chalk.dim('Run "parallel-cc templates create" to create a custom template.'));
+          return;
+        }
+
+        console.log(chalk.bold('Available Templates:\n'));
+
+        // Group by type
+        const builtIn = templates.filter(t => t.type === 'built-in');
+        const custom = templates.filter(t => t.type === 'custom');
+
+        if (builtIn.length > 0) {
+          console.log(chalk.green('Built-in Templates:'));
+          for (const t of builtIn) {
+            console.log(`  ${chalk.cyan(t.name)}`);
+            console.log(chalk.dim(`    ${t.description}`));
+            console.log(chalk.dim(`    E2B Template: ${t.e2bTemplate}`));
+          }
+          console.log('');
+        }
+
+        if (custom.length > 0) {
+          console.log(chalk.blue('Custom Templates:'));
+          for (const t of custom) {
+            console.log(`  ${chalk.cyan(t.name)}`);
+            console.log(chalk.dim(`    ${t.description}`));
+            console.log(chalk.dim(`    E2B Template: ${t.e2bTemplate}`));
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to list templates: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('templates-show <name>')
+  .alias('tpl-show')
+  .description('Show detailed template information')
+  .option('--json', 'Output as JSON')
+  .action(async (name: string, options) => {
+    const templateManager = new TemplateManager();
+
+    try {
+      const template = await templateManager.getTemplate(name);
+
+      if (!template) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: `Template "${name}" not found` }));
+        } else {
+          console.error(chalk.red(`✗ Template "${name}" not found`));
+          console.log(chalk.dim('Run "parallel-cc templates list" to see available templates.'));
+        }
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify({ success: true, template }, null, 2));
+      } else {
+        const isBuiltIn = await templateManager.isBuiltInTemplate(name);
+        console.log(chalk.bold(`Template: ${template.name}`));
+        console.log(chalk.dim(`Type: ${isBuiltIn ? 'built-in' : 'custom'}`));
+        console.log(`\nDescription: ${template.description}`);
+        console.log(`E2B Template: ${template.e2bTemplate}`);
+
+        if (template.setupCommands && template.setupCommands.length > 0) {
+          console.log('\nSetup Commands:');
+          for (const cmd of template.setupCommands) {
+            console.log(chalk.cyan(`  $ ${cmd}`));
+          }
+        }
+
+        if (template.environment && Object.keys(template.environment).length > 0) {
+          console.log('\nEnvironment Variables:');
+          for (const [key, value] of Object.entries(template.environment)) {
+            console.log(chalk.cyan(`  ${key}=${value}`));
+          }
+        }
+
+        if (template.metadata) {
+          console.log('\nMetadata:');
+          if (template.metadata.author) {
+            console.log(`  Author: ${template.metadata.author}`);
+          }
+          if (template.metadata.version) {
+            console.log(`  Version: ${template.metadata.version}`);
+          }
+          if (template.metadata.tags && template.metadata.tags.length > 0) {
+            console.log(`  Tags: ${template.metadata.tags.join(', ')}`);
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to show template: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('templates-create <name>')
+  .alias('tpl-create')
+  .description('Create a new custom template')
+  .requiredOption('--description <text>', 'Template description')
+  .option('--e2b-template <name>', 'E2B base template (default: anthropic-claude-code)', 'anthropic-claude-code')
+  .option('--setup-commands <cmds...>', 'Setup commands to run after sandbox creation')
+  .option('--env <vars...>', 'Environment variables in KEY=value format')
+  .option('--from-repo <path>', 'Detect project type and auto-configure')
+  .option('--json', 'Output as JSON')
+  .action(async (name: string, options) => {
+    const templateManager = new TemplateManager();
+
+    try {
+      // Validate name
+      if (!validateTemplateName(name)) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: 'Invalid template name: must be 3-50 alphanumeric characters, hyphens, or underscores'
+          }));
+        } else {
+          console.error(chalk.red('✗ Invalid template name'));
+          console.log(chalk.dim('Name must be 3-50 alphanumeric characters, hyphens, or underscores'));
+        }
+        process.exit(1);
+      }
+
+      // Parse environment variables
+      const environment: Record<string, string> = {};
+      if (options.env) {
+        for (const envVar of options.env) {
+          const [key, ...valueParts] = envVar.split('=');
+          if (key && valueParts.length > 0) {
+            environment[key] = valueParts.join('=');
+          }
+        }
+      }
+
+      // If --from-repo is provided, detect project type first
+      let detectedCommands: string[] = [];
+      if (options.fromRepo) {
+        const repoPath = path.resolve(options.fromRepo);
+        const detection = await templateManager.detectProjectType(repoPath);
+
+        if (detection.detected && detection.suggestedTemplate) {
+          const suggested = await templateManager.getTemplate(detection.suggestedTemplate);
+          if (suggested?.setupCommands) {
+            detectedCommands = suggested.setupCommands;
+            if (!options.json) {
+              console.log(chalk.dim(`Detected ${detection.reason}`));
+              console.log(chalk.dim(`Using setup commands from ${detection.suggestedTemplate}`));
+            }
+          }
+        }
+      }
+
+      const result = await templateManager.createTemplate({
+        name,
+        description: options.description,
+        e2bTemplate: options.e2bTemplate,
+        setupCommands: options.setupCommands || detectedCommands,
+        environment: Object.keys(environment).length > 0 ? environment : undefined
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.success) {
+          console.log(chalk.green(`✓ ${result.message}`));
+        } else {
+          console.error(chalk.red(`✗ ${result.error}`));
+          process.exit(1);
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to create template: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('templates-delete <name>')
+  .alias('tpl-delete')
+  .description('Delete a custom template')
+  .option('--force', 'Skip confirmation prompt')
+  .option('--json', 'Output as JSON')
+  .action(async (name: string, options) => {
+    const templateManager = new TemplateManager();
+
+    try {
+      // Check if template is built-in
+      const isBuiltIn = await templateManager.isBuiltInTemplate(name);
+      if (isBuiltIn) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: `Cannot delete built-in template "${name}"` }));
+        } else {
+          console.error(chalk.red(`✗ Cannot delete built-in template "${name}"`));
+        }
+        process.exit(1);
+      }
+
+      // Confirm deletion unless --force
+      if (!options.force && !options.json) {
+        const answer = await promptUser(`Delete template "${name}"? (y/n): `);
+        if (answer !== 'y' && answer !== 'yes') {
+          console.log(chalk.yellow('Deletion cancelled.'));
+          return;
+        }
+      }
+
+      const result = await templateManager.deleteTemplate(name);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.success) {
+          console.log(chalk.green(`✓ ${result.message}`));
+        } else {
+          console.error(chalk.red(`✗ ${result.error}`));
+          process.exit(1);
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to delete template: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+program
+  .command('templates-export <name>')
+  .alias('tpl-export')
+  .description('Export a template to JSON')
+  .option('--output <file>', 'Write to file instead of stdout')
+  .action(async (name: string, options) => {
+    const templateManager = new TemplateManager();
+
+    try {
+      const result = await templateManager.exportTemplate(name);
+
+      if (!result.success || !result.template) {
+        console.error(chalk.red(`✗ ${result.error}`));
+        process.exit(1);
+      }
+
+      const jsonOutput = JSON.stringify(result.template, null, 2);
+
+      if (options.output) {
+        await fs.writeFile(options.output, jsonOutput, 'utf-8');
+        console.log(chalk.green(`✓ Template exported to ${options.output}`));
+      } else {
+        console.log(jsonOutput);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(chalk.red(`✗ Failed to export template: ${errorMessage}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('templates-import')
+  .alias('tpl-import')
+  .description('Import a template from JSON')
+  .option('--file <path>', 'Read from file instead of stdin')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const templateManager = new TemplateManager();
+
+    try {
+      let jsonInput: string;
+
+      if (options.file) {
+        jsonInput = await fs.readFile(options.file, 'utf-8');
+      } else {
+        // Read from stdin
+        const chunks: string[] = [];
+        for await (const chunk of process.stdin) {
+          chunks.push(chunk.toString());
+        }
+        jsonInput = chunks.join('');
+      }
+
+      if (!jsonInput.trim()) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: 'No input provided' }));
+        } else {
+          console.error(chalk.red('✗ No input provided'));
+          console.log(chalk.dim('Provide JSON via --file or pipe to stdin'));
+        }
+        process.exit(1);
+      }
+
+      const result = await templateManager.importTemplate(jsonInput);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.success) {
+          console.log(chalk.green(`✓ ${result.message}`));
+        } else {
+          console.error(chalk.red(`✗ ${result.error}`));
+          process.exit(1);
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to import template: ${errorMessage}`));
+      }
+      process.exit(1);
     }
   });
 

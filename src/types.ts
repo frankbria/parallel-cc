@@ -557,3 +557,73 @@ export function isE2BSession(session: Session | E2BSession): session is E2BSessi
 export function isLocalSession(session: Session | E2BSession): session is Session {
   return !('execution_mode' in session) || session.execution_mode === 'local';
 }
+
+// ============================================================================
+// Sandbox Template Types (v1.1)
+// ============================================================================
+
+/**
+ * Template type identifier
+ */
+export type TemplateType = 'built-in' | 'custom';
+
+/**
+ * Template metadata for additional context
+ */
+export interface TemplateMetadata {
+  author?: string;
+  version?: string;
+  tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Sandbox template definition (JSON serializable)
+ */
+export interface SandboxTemplate {
+  name: string;
+  description: string;
+  e2bTemplate: string;
+  setupCommands?: string[];
+  environment?: Record<string, string>;
+  metadata?: TemplateMetadata;
+}
+
+/**
+ * Template with type information for listing
+ */
+export interface TemplateListEntry {
+  name: string;
+  description: string;
+  type: TemplateType;
+  e2bTemplate: string;
+}
+
+/**
+ * Result of template operations
+ */
+export interface TemplateOperationResult {
+  success: boolean;
+  message: string;
+  template?: SandboxTemplate;
+  error?: string;
+}
+
+/**
+ * Result of template validation
+ */
+export interface TemplateValidationResult {
+  isValid: boolean;
+  errors: string[];
+}
+
+/**
+ * Project type detection result
+ */
+export interface ProjectTypeDetection {
+  detected: boolean;
+  suggestedTemplate?: string;
+  reason?: string;
+  detectedFiles?: string[];
+}
