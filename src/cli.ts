@@ -1802,26 +1802,26 @@ Examples:
       // Apply managed template (setup commands and environment variables)
       if (managedTemplate) {
         if (!options.json) {
-          logger.info(chalk.dim(`  Applying template "${managedTemplate.name}"...`));
+          console.log(chalk.dim(`  Applying template "${managedTemplate.name}"...`));
         }
 
         const templateResult = await sandboxManager.applyTemplate(sandboxId, managedTemplate);
 
         if (templateResult.success) {
           if (!options.json) {
-            logger.info(chalk.green(`✓ Template "${managedTemplate.name}" applied`));
+            console.log(chalk.green(`✓ Template "${managedTemplate.name}" applied`));
             if (templateResult.commandsExecuted && templateResult.commandsExecuted > 0) {
-              logger.info(chalk.dim(`  Setup commands: ${templateResult.commandsExecuted}`));
+              console.log(chalk.dim(`  Setup commands: ${templateResult.commandsExecuted}`));
             }
             if (templateResult.environmentVarsSet && templateResult.environmentVarsSet > 0) {
-              logger.info(chalk.dim(`  Environment variables: ${templateResult.environmentVarsSet}`));
+              console.log(chalk.dim(`  Environment variables: ${templateResult.environmentVarsSet}`));
             }
           }
         } else {
           // Template application failure is non-blocking - warn but continue
           if (!options.json) {
-            logger.warn(chalk.yellow(`⚠ Template application failed: ${templateResult.error}`));
-            logger.warn(chalk.dim('  Continuing without template setup'));
+            console.warn(chalk.yellow(`⚠ Template application failed: ${templateResult.error}`));
+            console.warn(chalk.dim('  Continuing without template setup'));
           }
         }
       }
@@ -2747,6 +2747,9 @@ templatesCmd
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
+        if (!result.success) {
+          process.exit(1);
+        }
       } else {
         if (result.success) {
           console.log(chalk.green(`✓ ${result.message}`));
@@ -2810,6 +2813,9 @@ templatesCmd
 
       if (options.json) {
         console.log(JSON.stringify(result, null, 2));
+        if (!result.success) {
+          process.exit(1);
+        }
       } else {
         if (result.success) {
           console.log(chalk.green(`✓ ${result.message}`));
