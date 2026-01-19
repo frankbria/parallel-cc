@@ -53,7 +53,7 @@ export class GtrWrapper {
       return false;
     }
   }
-  
+
   /**
    * Create a new worktree
    */
@@ -90,7 +90,7 @@ export class GtrWrapper {
       return null;
     }
   }
-  
+
   /**
    * Remove a worktree
    */
@@ -122,17 +122,17 @@ export class GtrWrapper {
         `${cmd} list --porcelain`,
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
-      
+
       // Parse porcelain output
       // Format: worktree <path>\nHEAD <sha>\nbranch <ref>\n\n
       const entries: GtrListEntry[] = [];
       const blocks = output.trim().split('\n\n');
-      
+
       for (const block of blocks) {
         const lines = block.split('\n');
         let path = '';
         let branch = '';
-        
+
         for (const line of lines) {
           if (line.startsWith('worktree ')) {
             path = line.substring(9);
@@ -140,7 +140,7 @@ export class GtrWrapper {
             branch = line.substring(7).replace('refs/heads/', '');
           }
         }
-        
+
         if (path && branch) {
           entries.push({
             path,
@@ -149,7 +149,7 @@ export class GtrWrapper {
           });
         }
       }
-      
+
       return entries;
     } catch (error) {
       // Fallback to git worktree list if gtr fails
@@ -167,15 +167,15 @@ export class GtrWrapper {
         'git worktree list --porcelain',
         { cwd: this.repoPath, encoding: 'utf-8', stdio: 'pipe' }
       );
-      
+
       const entries: GtrListEntry[] = [];
       const blocks = output.trim().split('\n\n');
-      
+
       for (const block of blocks) {
         const lines = block.split('\n');
         let path = '';
         let branch = '';
-        
+
         for (const line of lines) {
           if (line.startsWith('worktree ')) {
             path = line.substring(9);
@@ -183,7 +183,7 @@ export class GtrWrapper {
             branch = line.substring(7).replace('refs/heads/', '');
           }
         }
-        
+
         if (path) {
           entries.push({
             path,
@@ -192,14 +192,14 @@ export class GtrWrapper {
           });
         }
       }
-      
+
       return entries;
     } catch (error) {
       logger.error('Failed to list worktrees via git', error);
       return [];
     }
   }
-  
+
   /**
    * Get the main repo path
    */
@@ -208,7 +208,7 @@ export class GtrWrapper {
     const main = entries.find(e => e.isMain);
     return main?.path ?? null;
   }
-  
+
   /**
    * Generate a unique worktree name
    */

@@ -91,7 +91,7 @@ export class SessionDB {
     this.db.pragma('busy_timeout = 5000');
     this.init();
   }
-  
+
   private resolvePath(path: string): string {
     if (path.startsWith('~')) {
       return path.replace('~', homedir());
@@ -158,14 +158,14 @@ export class SessionDB {
       CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(is_active);
     `);
   }
-  
+
   createSession(session: Omit<Session, 'created_at' | 'last_heartbeat'>): Session {
     const stmt = this.db.prepare(`
       INSERT INTO sessions (id, pid, repo_path, worktree_path, worktree_name, is_main_repo)
       VALUES (?, ?, ?, ?, ?, ?)
       RETURNING *
     `);
-    
+
     const row = stmt.get(
       session.id,
       session.pid,
@@ -174,7 +174,7 @@ export class SessionDB {
       session.worktree_name,
       session.is_main_repo ? 1 : 0
     ) as SessionRow;
-    
+
     return this.rowToSession(row);
   }
 
@@ -185,7 +185,7 @@ export class SessionDB {
     const rows = stmt.all(repoPath) as SessionRow[];
     return rows.map(row => this.rowToSession(row));
   }
-  
+
   getSessionByPid(pid: number): Session | null {
     const stmt = this.db.prepare(`
       SELECT * FROM sessions WHERE pid = ?
@@ -193,7 +193,7 @@ export class SessionDB {
     const row = stmt.get(pid) as SessionRow | undefined;
     return row ? this.rowToSession(row) : null;
   }
-  
+
   getSessionById(id: string): Session | null {
     const stmt = this.db.prepare(`
       SELECT * FROM sessions WHERE id = ?
@@ -201,7 +201,7 @@ export class SessionDB {
     const row = stmt.get(id) as SessionRow | undefined;
     return row ? this.rowToSession(row) : null;
   }
-  
+
   getAllSessions(): Session[] {
     const stmt = this.db.prepare(`SELECT * FROM sessions`);
     const rows = stmt.all() as SessionRow[];
@@ -210,30 +210,30 @@ export class SessionDB {
 
   updateHeartbeat(sessionId: string): boolean {
     const stmt = this.db.prepare(`
-      UPDATE sessions 
+      UPDATE sessions
       SET last_heartbeat = datetime('now')
       WHERE id = ?
     `);
     const result = stmt.run(sessionId);
     return result.changes > 0;
   }
-  
+
   updateHeartbeatByPid(pid: number): boolean {
     const stmt = this.db.prepare(`
-      UPDATE sessions 
+      UPDATE sessions
       SET last_heartbeat = datetime('now')
       WHERE pid = ?
     `);
     const result = stmt.run(pid);
     return result.changes > 0;
   }
-  
+
   deleteSession(sessionId: string): boolean {
     const stmt = this.db.prepare(`DELETE FROM sessions WHERE id = ?`);
     const result = stmt.run(sessionId);
     return result.changes > 0;
   }
-  
+
   deleteSessionByPid(pid: number): Session | null {
     const session = this.getSessionByPid(pid);
     if (session) {
@@ -244,13 +244,13 @@ export class SessionDB {
 
   getStaleSessions(thresholdMinutes: number): Session[] {
     const stmt = this.db.prepare(`
-      SELECT * FROM sessions 
+      SELECT * FROM sessions
       WHERE datetime(last_heartbeat) < datetime('now', ? || ' minutes')
     `);
     const rows = stmt.all(`-${thresholdMinutes}`) as SessionRow[];
     return rows.map(row => this.rowToSession(row));
   }
-  
+
   deleteStaleSessions(thresholdMinutes: number): Session[] {
     const stale = this.getStaleSessions(thresholdMinutes);
     for (const session of stale) {
@@ -258,16 +258,16 @@ export class SessionDB {
     }
     return stale;
   }
-  
+
   hasMainRepoSession(repoPath: string): boolean {
     const stmt = this.db.prepare(`
-      SELECT 1 FROM sessions 
+      SELECT 1 FROM sessions
       WHERE repo_path = ? AND is_main_repo = 1
       LIMIT 1
     `);
     return stmt.get(repoPath) !== undefined;
   }
-  
+
   private rowToSession(row: SessionRow): Session {
     return {
       ...row,

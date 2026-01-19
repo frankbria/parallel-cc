@@ -23,13 +23,13 @@ export class Coordinator {
   private db: SessionDB;
   private config: Config;
   private fileClaimsManager: FileClaimsManager;
-  
+
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.db = new SessionDB(this.config.dbPath);
     this.fileClaimsManager = new FileClaimsManager(this.db, logger);
   }
-  
+
   /**
    * Register a new session. Creates worktree if parallel session exists.
    */
@@ -113,14 +113,14 @@ export class Coordinator {
       };
     })();
   }
-  
+
   /**
    * Update heartbeat for a session
    */
   heartbeat(pid: number): boolean {
     return this.db.updateHeartbeatByPid(pid);
   }
-  
+
   /**
    * Release a session and optionally cleanup worktree
    */
@@ -164,16 +164,16 @@ export class Coordinator {
    */
   status(repoPath?: string): StatusResult {
     const normalizedRepo = repoPath ? this.normalizeRepoPath(repoPath) : null;
-    
-    const allSessions = normalizedRepo 
+
+    const allSessions = normalizedRepo
       ? this.db.getSessionsByRepo(normalizedRepo)
       : this.db.getAllSessions();
-    
+
     const sessions: SessionInfo[] = allSessions.map(s => {
       const isAlive = this.isProcessAlive(s.pid);
       const createdAt = new Date(s.created_at);
       const durationMinutes = Math.round((Date.now() - createdAt.getTime()) / 60000);
-      
+
       return {
         sessionId: s.id,
         pid: s.pid,
@@ -186,7 +186,7 @@ export class Coordinator {
         durationMinutes
       };
     });
-    
+
     return {
       repoPath: normalizedRepo ?? 'all',
       totalSessions: sessions.length,
@@ -374,7 +374,7 @@ export class Coordinator {
       return [];
     }
   }
-  
+
   private async cleanupStaleSessions(): Promise<void> {
     // Silent cleanup during registration
     await this.cleanup();
@@ -392,7 +392,7 @@ export class Coordinator {
       return false;
     }
   }
-  
+
   /**
    * Normalize repo path to canonical form
    */
@@ -411,7 +411,7 @@ export class Coordinator {
       return repoPath;
     }
   }
-  
+
   /**
    * Get database instance (for MCP tools and testing)
    */
