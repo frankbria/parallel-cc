@@ -34,6 +34,8 @@ import { executeClaudeInSandbox } from './e2b/claude-runner.js';
 import { pushToRemoteAndCreatePR } from './e2b/git-live.js';
 import { validateSSHKeyPath, injectSSHKey, cleanupSSHKey, getSecurityWarning } from './e2b/ssh-key-injector.js';
 import { TemplateManager, validateTemplateName, validateTemplate } from './e2b/templates.js';
+import { ConfigManager, DEFAULT_CONFIG_PATH } from './config.js';
+import { BudgetTracker } from './budget-tracker.js';
 import { logger } from './logger.js';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -1437,6 +1439,7 @@ Examples:
   .option('--confirm-ssh-key', 'Skip interactive SSH key security warning (for non-interactive use)')
   .option('--npm-token <token>', 'NPM authentication token for private packages (or set PARALLEL_CC_NPM_TOKEN env var)')
   .option('--npm-registry <url>', 'Custom NPM registry URL (default: https://registry.npmjs.org)', 'https://registry.npmjs.org')
+  .option('--budget <amount>', 'Per-session budget limit in USD (e.g., 0.50 for $0.50)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1748,6 +1751,18 @@ Examples:
         const createResult = await sandboxManager.createSandbox(sessionId);
         sandbox = createResult.sandbox;
         sandboxId = createResult.sandboxId; // Track for cleanup in catch block
+
+        // Set budget limit if provided (v1.1)
+        if (options.budget) {
+          const budgetAmount = parseFloat(options.budget);
+          if (isNaN(budgetAmount) || budgetAmount < 0) {
+            throw new Error(`Invalid budget amount: ${options.budget}. Must be a positive number.`);
+          }
+          sandboxManager.setBudgetLimit(sandboxId, budgetAmount);
+          if (!options.json) {
+            console.log(chalk.dim(`  Budget limit: $${budgetAmount.toFixed(2)}`));
+          }
+        }
 
       if (!options.json) {
         console.log(chalk.green(`✓ Sandbox created: ${sandboxId}`));
@@ -2998,6 +3013,229 @@ templatesCmd
         console.log(JSON.stringify({ success: false, error: errorMessage }));
       } else {
         console.error(chalk.red(`✗ Failed to import template: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// Config Commands (v1.1)
+// ============================================================================
+
+/**
+ * Config command - Manage parallel-cc configuration
+ */
+const configCmd = program
+  .command('config')
+  .description('Manage parallel-cc configuration (v1.1)');
+
+configCmd
+  .command('set <key> <value>')
+  .description('Set a configuration value (e.g., budget.monthly-limit 10.00)')
+  .option('--json', 'Output as JSON')
+  .action(async (key: string, value: string, options) => {
+    try {
+      const configManager = new ConfigManager();
+
+      // Convert key from kebab-case to camelCase for budget keys
+      const normalizedKey = key.replace('monthly-limit', 'monthlyLimit')
+        .replace('per-session-default', 'perSessionDefault')
+        .replace('warning-thresholds', 'warningThresholds');
+
+      // Parse value based on key type
+      let parsedValue: unknown;
+
+      if (normalizedKey.includes('budget')) {
+        // Budget values are numbers or arrays
+        if (normalizedKey.includes('Thresholds')) {
+          // Parse as array of numbers
+          parsedValue = value.split(',').map(v => parseFloat(v.trim()));
+        } else {
+          // Parse as number
+          parsedValue = parseFloat(value);
+          if (isNaN(parsedValue as number)) {
+            throw new Error(`Invalid number: ${value}`);
+          }
+        }
+      } else if (value === 'true' || value === 'false') {
+        parsedValue = value === 'true';
+      } else if (!isNaN(parseFloat(value))) {
+        parsedValue = parseFloat(value);
+      } else {
+        parsedValue = value;
+      }
+
+      configManager.set(normalizedKey, parsedValue);
+
+      if (options.json) {
+        console.log(JSON.stringify({ success: true, key: normalizedKey, value: parsedValue }));
+      } else {
+        console.log(chalk.green(`✓ Set ${normalizedKey} = ${JSON.stringify(parsedValue)}`));
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to set config: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('get <key>')
+  .description('Get a configuration value')
+  .option('--json', 'Output as JSON')
+  .action(async (key: string, options) => {
+    try {
+      const configManager = new ConfigManager();
+
+      // Convert key from kebab-case to camelCase
+      const normalizedKey = key.replace('monthly-limit', 'monthlyLimit')
+        .replace('per-session-default', 'perSessionDefault')
+        .replace('warning-thresholds', 'warningThresholds');
+
+      const value = configManager.get(normalizedKey);
+
+      if (options.json) {
+        console.log(JSON.stringify({ key: normalizedKey, value }));
+      } else {
+        if (value === undefined) {
+          console.log(chalk.yellow(`${normalizedKey}: (not set)`));
+        } else {
+          console.log(`${normalizedKey}: ${JSON.stringify(value)}`);
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get config: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+configCmd
+  .command('list')
+  .description('Display all configuration values')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      const configManager = new ConfigManager();
+      const config = configManager.getAll();
+
+      if (options.json) {
+        console.log(JSON.stringify(config, null, 2));
+      } else {
+        console.log(chalk.bold('Configuration:'));
+        console.log(chalk.dim(`  File: ${DEFAULT_CONFIG_PATH}\n`));
+
+        // Display budget config
+        console.log(chalk.cyan('Budget Settings:'));
+        const budget = config.budget;
+        console.log(`  monthly-limit: ${budget.monthlyLimit !== undefined ? `$${budget.monthlyLimit.toFixed(2)}` : chalk.dim('(not set)')}`);
+        console.log(`  per-session-default: ${budget.perSessionDefault !== undefined ? `$${budget.perSessionDefault.toFixed(2)}` : chalk.dim('(not set)')}`);
+        console.log(`  warning-thresholds: ${budget.warningThresholds ? budget.warningThresholds.map(t => `${(t * 100).toFixed(0)}%`).join(', ') : chalk.dim('(not set)')}`);
+
+        // Display other config keys
+        const otherKeys = Object.keys(config).filter(k => k !== 'budget');
+        if (otherKeys.length > 0) {
+          console.log(chalk.cyan('\nOther Settings:'));
+          for (const key of otherKeys) {
+            console.log(`  ${key}: ${JSON.stringify(config[key])}`);
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to list config: ${errorMessage}`));
+      }
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// Budget Status Command (v1.1)
+// ============================================================================
+
+/**
+ * Budget status command - Show spending and budget information
+ */
+program
+  .command('budget-status')
+  .description('Show budget and spending status (v1.1)')
+  .option('--period <period>', 'Show specific period (daily, weekly, monthly)', 'monthly')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      const db = new SessionDB();
+
+      // Run migration if needed
+      if (!db.hasBudgetTrackingTable()) {
+        console.log(chalk.yellow('Running database migration for budget tracking...'));
+        await db.migrateToLatest();
+      }
+
+      const configManager = new ConfigManager();
+      const tracker = new BudgetTracker(db, configManager);
+
+      const period = options.period as 'daily' | 'weekly' | 'monthly';
+      const status = tracker.generateBudgetStatus(period);
+
+      if (options.json) {
+        console.log(JSON.stringify(status, null, 2));
+      } else {
+        console.log(chalk.bold(`\nBudget Status (${period})\n`));
+
+        // Current period info
+        console.log(chalk.cyan('Current Period:'));
+        console.log(`  Start: ${status.currentPeriod.start}`);
+        console.log(`  Spent: ${chalk.yellow(`$${status.currentPeriod.spent.toFixed(2)}`)}`);
+
+        if (status.currentPeriod.limit !== undefined) {
+          console.log(`  Limit: $${status.currentPeriod.limit.toFixed(2)}`);
+          const remaining = status.currentPeriod.remaining ?? 0;
+          const remainingColor = remaining > status.currentPeriod.limit * 0.2 ? chalk.green : chalk.yellow;
+          console.log(`  Remaining: ${remainingColor(`$${remaining.toFixed(2)}`)}`);
+          const percentUsed = (status.currentPeriod.spent / status.currentPeriod.limit) * 100;
+          console.log(`  Usage: ${percentUsed.toFixed(1)}%`);
+        } else {
+          console.log(chalk.dim('  Limit: (not set)'));
+        }
+
+        // Active sessions
+        if (status.sessions.length > 0) {
+          console.log(chalk.cyan('\nActive E2B Sessions:'));
+          for (const session of status.sessions) {
+            const cost = session.costEstimate !== undefined ? `$${session.costEstimate.toFixed(2)}` : 'calculating...';
+            const budget = session.budgetLimit !== undefined ? ` (limit: $${session.budgetLimit.toFixed(2)})` : '';
+            console.log(`  ${session.sessionId.substring(0, 8)}... - ${cost}${budget}`);
+          }
+        } else {
+          console.log(chalk.dim('\nNo active E2B sessions.'));
+        }
+
+        // Summary
+        console.log(chalk.cyan('\nSummary:'));
+        console.log(`  Total spent this ${period}: $${status.totalSpent.toFixed(2)}`);
+        if (status.remainingBudget !== undefined) {
+          console.log(`  Remaining budget: $${status.remainingBudget.toFixed(2)}`);
+        }
+      }
+
+      db.close();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (options.json) {
+        console.log(JSON.stringify({ error: errorMessage }));
+      } else {
+        console.error(chalk.red(`✗ Failed to get budget status: ${errorMessage}`));
       }
       process.exit(1);
     }

@@ -1439,6 +1439,26 @@ export async function monitorExecution(
       }
     }
 
+    // Check budget limit (v1.1)
+    try {
+      const budgetWarning = await sandboxManager.checkBudgetLimit(sandboxId);
+      if (budgetWarning) {
+        // Soft budget warning - log but continue
+        logger.warn(`Budget warning: ${budgetWarning.message}`);
+      }
+    } catch (budgetError) {
+      // BudgetExceededError is thrown when budget is exceeded
+      if (budgetError instanceof Error && budgetError.name === 'BudgetExceededError') {
+        logger.error(`Budget exceeded for sandbox ${sandboxId}`);
+        return {
+          shouldTerminate: true,
+          reason: budgetError.message
+        };
+      }
+      // Other errors - log but don't terminate
+      logger.warn(`Budget check error: ${budgetError instanceof Error ? budgetError.message : String(budgetError)}`);
+    }
+
     // Check sandbox health
     const healthCheck = await sandboxManager.monitorSandboxHealth(sandboxId);
     if (!healthCheck.isHealthy) {

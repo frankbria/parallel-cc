@@ -497,6 +497,7 @@ export interface E2BSessionConfig {
   sandboxImage: string; // Recommended: "anthropic-claude-code" (pre-installed Claude Code). Fallback: "base" or custom images auto-install via apt-get (Debian/Ubuntu required) then npm install -g @anthropic-ai/claude-code
   timeoutMinutes?: number; // Default: 60
   warningThresholds?: number[]; // Default: [30, 50] minutes
+  budgetWarningThresholds?: number[]; // Default: [0.5, 0.8] (50%, 80% of budget)
 }
 
 /**
@@ -609,6 +610,70 @@ export interface BudgetTracking {
   budgetLimit?: number;
   spent: number;
   createdAt: string;
+}
+
+/**
+ * Budget configuration for user settings
+ */
+export interface BudgetConfig {
+  /** Monthly spending limit in USD */
+  monthlyLimit?: number;
+  /** Default per-session budget in USD */
+  perSessionDefault?: number;
+  /** Warning thresholds as percentages (e.g., [0.5, 0.8] for 50% and 80%) */
+  warningThresholds?: number[];
+}
+
+/**
+ * Budget status report for CLI command
+ */
+export interface BudgetStatus {
+  currentPeriod: {
+    period: BudgetPeriod;
+    start: string;
+    limit?: number;
+    spent: number;
+    remaining?: number;
+  };
+  sessions: Array<{
+    sessionId: string;
+    sandboxId?: string;
+    budgetLimit?: number;
+    costEstimate?: number;
+    status?: string;
+    createdAt: string;
+  }>;
+  totalSpent: number;
+  remainingBudget?: number;
+}
+
+/**
+ * Budget warning during sandbox execution (similar to TimeoutWarning)
+ */
+export interface BudgetWarning {
+  sandboxId: string;
+  currentCost: number;
+  budgetLimit: number;
+  percentUsed: number;
+  warningLevel: 'soft' | 'hard';
+  message: string;
+}
+
+/**
+ * Error thrown when budget is exceeded
+ */
+export class BudgetExceededError extends Error {
+  public readonly sandboxId: string;
+  public readonly currentCost: number;
+  public readonly budgetLimit: number;
+
+  constructor(sandboxId: string, currentCost: number, budgetLimit: number) {
+    super(`Budget exceeded for sandbox ${sandboxId}: $${currentCost.toFixed(2)} >= $${budgetLimit.toFixed(2)}`);
+    this.name = 'BudgetExceededError';
+    this.sandboxId = sandboxId;
+    this.currentCost = currentCost;
+    this.budgetLimit = budgetLimit;
+  }
 }
 
 // ============================================================================
