@@ -1053,8 +1053,8 @@ program
             console.log(chalk.dim(`  - v${version}`));
           }
           console.log('');
-          console.log(chalk.dim('Database is now at version 1.0.0'));
-          console.log(chalk.dim('E2B sandbox features are now available'));
+          console.log(chalk.dim('Database is now at version 1.1.0'));
+          console.log(chalk.dim('All v1.1 features are now available'));
         }
       }
     } catch (error) {
