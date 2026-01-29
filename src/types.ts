@@ -41,6 +41,16 @@ export interface Session {
   prompt?: string | null;
   status?: string | null;
   output_log?: string | null;
+  // v1.1: Git configuration tracking
+  git_user?: string | null;
+  git_email?: string | null;
+  ssh_key_provided?: boolean;
+  // v1.1: Cost tracking
+  budget_limit?: number | null;
+  cost_estimate?: number | null;
+  actual_cost?: number | null;
+  // v1.1: Template tracking
+  template_name?: string | null;
 }
 
 export interface SessionRow {
@@ -58,6 +68,16 @@ export interface SessionRow {
   prompt?: string | null;
   status?: string | null;
   output_log?: string | null;
+  // v1.1: Git configuration tracking
+  git_user?: string | null;
+  git_email?: string | null;
+  ssh_key_provided?: number; // SQLite stores booleans as 0/1
+  // v1.1: Cost tracking
+  budget_limit?: number | null;
+  cost_estimate?: number | null;
+  actual_cost?: number | null;
+  // v1.1: Template tracking
+  template_name?: string | null;
 }
 
 export interface RegisterResult {
@@ -556,6 +576,39 @@ export function isE2BSession(session: Session | E2BSession): session is E2BSessi
  */
 export function isLocalSession(session: Session | E2BSession): session is Session {
   return !('execution_mode' in session) || session.execution_mode === 'local';
+}
+
+// ============================================================================
+// Budget Tracking Types (v1.1)
+// ============================================================================
+
+/**
+ * Budget period type for tracking spending over time
+ */
+export type BudgetPeriod = 'daily' | 'weekly' | 'monthly';
+
+/**
+ * Database row for budget_tracking table
+ */
+export interface BudgetTrackingRow {
+  id: string;
+  period: BudgetPeriod;
+  period_start: string;
+  budget_limit: number | null;
+  spent: number;
+  created_at: string;
+}
+
+/**
+ * Budget tracking model (TypeScript types)
+ */
+export interface BudgetTracking {
+  id: string;
+  period: BudgetPeriod;
+  periodStart: string;
+  budgetLimit?: number;
+  spent: number;
+  createdAt: string;
 }
 
 // ============================================================================

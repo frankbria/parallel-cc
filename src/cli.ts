@@ -1020,7 +1020,7 @@ program
  */
 program
   .command('update')
-  .description('Update database schema to latest version (v1.0.0) - runs all necessary migrations')
+  .description('Update database schema to latest version (v1.1.0) - runs all necessary migrations')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
@@ -1031,7 +1031,7 @@ program
       if (!options.json) {
         console.log(chalk.bold('\nUpdating parallel-cc database schema\n'));
         console.log(chalk.dim(`Current version: ${currentVersion || 'none'}`));
-        console.log(chalk.dim('Target version: 1.0.0\n'));
+        console.log(chalk.dim('Target version: 1.1.0\n'));
       }
 
       const result = await db.migrateToLatest();
@@ -1076,15 +1076,15 @@ program
  */
 program
   .command('migrate')
-  .description('Run database migration to specified version (default: latest 1.0.0)')
-  .option('--version <version>', 'Target version (0.5.0 or 1.0.0)', '1.0.0')
+  .description('Run database migration to specified version (default: latest 1.1.0)')
+  .option('--version <version>', 'Target version (0.5.0, 1.0.0, or 1.1.0)', '1.1.0')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
     const coordinator = new Coordinator();
     const targetVersion = options.version;
 
     // Validate version parameter
-    const validVersions = ['0.5.0', '1.0.0'];
+    const validVersions = ['0.5.0', '1.0.0', '1.1.0'];
     if (!validVersions.includes(targetVersion)) {
       if (options.json) {
         console.log(JSON.stringify({ success: false, error: `Invalid version: ${targetVersion}. Valid versions: ${validVersions.join(', ')}` }));
@@ -1133,6 +1133,35 @@ program
           console.log(chalk.green('✓ Migration to v1.0.0 completed successfully'));
           console.log(chalk.dim('  Added E2B sandbox columns: execution_mode, sandbox_id, prompt, status, output_log'));
           console.log(chalk.dim('  E2B sandbox features are now available'));
+        }
+      } else if (targetVersion === '1.1.0') {
+        // Need to run v0.5.0 first if not already there
+        if (!currentVersion || currentVersion < '0.5.0') {
+          if (!options.json) {
+            console.log(chalk.dim('Running v0.5.0 migration first...'));
+          }
+          await db.migrateToV05();
+        }
+
+        // Need to run v1.0.0 first if not already there
+        if (!currentVersion || currentVersion < '1.0.0') {
+          if (!options.json) {
+            console.log(chalk.dim('Running v1.0.0 migration first...'));
+          }
+          await db.runMigration('1.0.0');
+        }
+
+        // Now run v1.1.0 migration
+        await db.runMigration('1.1.0');
+
+        if (options.json) {
+          console.log(JSON.stringify({ success: true, message: 'Migration to v1.1.0 completed', version: '1.1.0' }));
+        } else {
+          console.log(chalk.green('✓ Migration to v1.1.0 completed successfully'));
+          console.log(chalk.dim('  Added git config columns: git_user, git_email, ssh_key_provided'));
+          console.log(chalk.dim('  Added cost tracking columns: budget_limit, cost_estimate, actual_cost'));
+          console.log(chalk.dim('  Added template tracking: template_name'));
+          console.log(chalk.dim('  Added budget_tracking table for period-based spending limits'));
         }
       }
     } catch (error) {
