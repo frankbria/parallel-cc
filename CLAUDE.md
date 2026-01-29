@@ -276,7 +276,7 @@ node dist/cli.js mcp-serve  # Start MCP server (stdio)
 SQLite database at `~/.parallel-cc/coordinator.db`:
 
 ```sql
--- Sessions table (core)
+-- Sessions table (core + v1.0 E2B + v1.1 cost/git tracking)
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY,
   pid INTEGER NOT NULL,
@@ -285,7 +285,23 @@ CREATE TABLE sessions (
   worktree_name TEXT,
   is_main_repo INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_heartbeat TEXT NOT NULL DEFAULT (datetime('now'))
+  last_heartbeat TEXT NOT NULL DEFAULT (datetime('now')),
+  -- v1.0: E2B sandbox columns
+  execution_mode TEXT DEFAULT 'local',
+  sandbox_id TEXT,
+  prompt TEXT,
+  status TEXT,
+  output_log TEXT,
+  -- v1.1: Git configuration tracking
+  git_user TEXT,
+  git_email TEXT,
+  ssh_key_provided INTEGER DEFAULT 0,
+  -- v1.1: Cost tracking
+  budget_limit REAL,
+  cost_estimate REAL,
+  actual_cost REAL,
+  -- v1.1: Template tracking
+  template_name TEXT
 );
 
 -- Merge events table (v0.4)
@@ -314,6 +330,16 @@ CREATE TABLE subscriptions (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- Budget tracking table (v1.1)
+CREATE TABLE budget_tracking (
+  id TEXT PRIMARY KEY,
+  period TEXT NOT NULL,
+  period_start TEXT NOT NULL,
+  budget_limit REAL,
+  spent REAL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX idx_sessions_repo ON sessions(repo_path);
 CREATE INDEX idx_sessions_pid ON sessions(pid);
 CREATE INDEX idx_sessions_heartbeat ON sessions(last_heartbeat);
@@ -321,6 +347,7 @@ CREATE INDEX idx_merge_events_repo ON merge_events(repo_path);
 CREATE INDEX idx_merge_events_branch ON merge_events(branch_name);
 CREATE INDEX idx_subscriptions_session ON subscriptions(session_id);
 CREATE INDEX idx_subscriptions_active ON subscriptions(is_active);
+CREATE INDEX idx_budget_period ON budget_tracking(period, period_start);
 ```
 
 ## CLI Commands
@@ -334,7 +361,7 @@ CREATE INDEX idx_subscriptions_active ON subscriptions(is_active);
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
 | `mcp-serve` | Start MCP server (stdio transport) |
-| `update` | Update database schema to latest version (v1.0.0) - runs all necessary migrations |
+| `update` | Update database schema to latest version (v1.1.0) - runs all necessary migrations |
 | `watch-merges` | Start merge detection daemon (v0.4) |
 | `watch-merges --once` | Run single merge detection poll (v0.4) |
 | `merge-status` | Show merge events history (v0.4) |

@@ -276,7 +276,16 @@ export class SessionDB {
       sandbox_id: row.sandbox_id || undefined,
       prompt: row.prompt || undefined,
       status: row.status || undefined,
-      output_log: row.output_log || undefined
+      output_log: row.output_log || undefined,
+      // v1.1: Convert SQLite integer to boolean for ssh_key_provided
+      ssh_key_provided: row.ssh_key_provided === 1 ? true : row.ssh_key_provided === 0 ? false : undefined,
+      // v1.1: Convert null to undefined for optional fields
+      git_user: row.git_user || undefined,
+      git_email: row.git_email || undefined,
+      budget_limit: row.budget_limit ?? undefined,
+      cost_estimate: row.cost_estimate ?? undefined,
+      actual_cost: row.actual_cost ?? undefined,
+      template_name: row.template_name || undefined
     };
   }
 
@@ -588,6 +597,26 @@ export class SessionDB {
         WHERE name IN ('execution_mode', 'sandbox_id', 'prompt', 'status', 'output_log')
       `).all() as { name: string }[];
       return columns.length === 5;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if v1.1.0 columns exist in sessions table
+   *
+   * v1.1.0 adds:
+   * - git_user, git_email, ssh_key_provided (git configuration)
+   * - budget_limit, cost_estimate, actual_cost (cost tracking)
+   * - template_name (template tracking)
+   */
+  hasV11Columns(): boolean {
+    try {
+      const columns = this.db.prepare(`
+        SELECT name FROM pragma_table_info('sessions')
+        WHERE name IN ('git_user', 'git_email', 'ssh_key_provided', 'budget_limit', 'cost_estimate', 'actual_cost', 'template_name')
+      `).all() as { name: string }[];
+      return columns.length === 7;
     } catch {
       return false;
     }
@@ -1417,13 +1446,15 @@ export class SessionDB {
    * Migrate to the latest schema version automatically
    *
    * This method checks the current schema version and runs all necessary
-   * migrations to bring the database up to v1.0.0 (the latest version).
+   * migrations to bring the database up to v1.1.0 (the latest version).
+   *
+   * Migration chain: v0.5.0 -> v1.0.0 -> v1.1.0
    *
    * @throws Error if migration fails
    */
   async migrateToLatest(): Promise<{ from: string | null; to: string; migrations: string[] }> {
     const currentVersion = this.getSchemaVersion();
-    const targetVersion = '1.0.0';
+    const targetVersion = '1.1.0';
     const migrationsRun: string[] = [];
 
     logger.info(`Current schema version: ${currentVersion || 'none'}`);
@@ -1445,6 +1476,12 @@ export class SessionDB {
       logger.info('Running v1.0.0 migration...');
       await this.runMigration('1.0.0');
       migrationsRun.push('1.0.0');
+    }
+
+    if (!currentVersion || currentVersion < '1.1.0') {
+      logger.info('Running v1.1.0 migration...');
+      await this.runMigration('1.1.0');
+      migrationsRun.push('1.1.0');
     }
 
     logger.info(`Migration complete: ${currentVersion || 'none'} → ${targetVersion}`);
