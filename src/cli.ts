@@ -3173,8 +3173,9 @@ program
   .option('--period <period>', 'Show specific period (daily, weekly, monthly)', 'monthly')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
+    let db: SessionDB | null = null;
     try {
-      const db = new SessionDB();
+      db = new SessionDB();
 
       // Run migration if needed
       if (!db.hasBudgetTrackingTable()) {
@@ -3228,8 +3229,6 @@ program
           console.log(`  Remaining budget: $${status.remainingBudget.toFixed(2)}`);
         }
       }
-
-      db.close();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       if (options.json) {
@@ -3238,6 +3237,11 @@ program
         console.error(chalk.red(`✗ Failed to get budget status: ${errorMessage}`));
       }
       process.exit(1);
+    } finally {
+      // Always close database connection
+      if (db) {
+        db.close();
+      }
     }
   });
 

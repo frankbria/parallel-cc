@@ -351,6 +351,39 @@ describe('ConfigManager', () => {
       configManager = new ConfigManager(TEST_CONFIG_PATH);
     });
 
+    // Key validation tests
+    it('should reject prototype pollution keys', () => {
+      expect(() => configManager.set('__proto__', 'value'))
+        .toThrow('reserved property');
+      expect(() => configManager.set('constructor', 'value'))
+        .toThrow('reserved property');
+      expect(() => configManager.set('prototype', 'value'))
+        .toThrow('reserved property');
+    });
+
+    it('should reject keys starting with underscore', () => {
+      expect(() => configManager.set('_private', 'value'))
+        .toThrow('keys starting with underscore are reserved');
+    });
+
+    it('should reject keys with invalid format', () => {
+      expect(() => configManager.set('123invalid', 'value'))
+        .toThrow('must start with a letter');
+      expect(() => configManager.set('has spaces', 'value'))
+        .toThrow('must start with a letter');
+    });
+
+    it('should reject dangerous nested keys', () => {
+      expect(() => configManager.set('budget.__proto__', 'value'))
+        .toThrow('reserved property');
+    });
+
+    it('should allow valid keys with hyphens and numbers', () => {
+      expect(() => configManager.set('valid-key', 'value')).not.toThrow();
+      expect(() => configManager.set('key123', 'value')).not.toThrow();
+      expect(() => configManager.set('camelCase', 'value')).not.toThrow();
+    });
+
     it('should reject negative budget limits', () => {
       expect(() => configManager.setBudgetConfig({ monthlyLimit: -10.00 }))
         .toThrow('Budget limit must be a positive number');

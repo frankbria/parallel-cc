@@ -191,13 +191,41 @@ export class ConfigManager {
   }
 
   /**
+   * Validate that a key part is safe (prevents prototype pollution)
+   */
+  private validateKeyPart(part: string): void {
+    // Prevent prototype pollution attacks
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    if (dangerousKeys.includes(part)) {
+      throw new Error(`Invalid config key: "${part}" is a reserved property`);
+    }
+
+    // Prevent keys starting with underscore (internal properties)
+    if (part.startsWith('_')) {
+      throw new Error(`Invalid config key: keys starting with underscore are reserved`);
+    }
+
+    // Validate key format (alphanumeric, hyphens, underscores only for middle parts)
+    if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(part)) {
+      throw new Error(`Invalid config key format: "${part}" must start with a letter and contain only alphanumeric characters, hyphens, or underscores`);
+    }
+  }
+
+  /**
    * Set a config value by key (supports dot notation)
    *
    * @param key - Config key (e.g., "budget.monthlyLimit")
    * @param value - Value to set
+   * @throws Error if key is invalid or reserved
    */
   set(key: string, value: unknown): void {
     const parts = key.split('.');
+
+    // Validate all key parts
+    for (const part of parts) {
+      this.validateKeyPart(part);
+    }
+
     let current: Record<string, unknown> = this.config;
 
     // Navigate/create path to parent
@@ -220,9 +248,16 @@ export class ConfigManager {
    * Delete a config key (supports dot notation)
    *
    * @param key - Config key to delete
+   * @throws Error if key is invalid or reserved
    */
   delete(key: string): void {
     const parts = key.split('.');
+
+    // Validate all key parts
+    for (const part of parts) {
+      this.validateKeyPart(part);
+    }
+
     let current: Record<string, unknown> = this.config;
 
     // Navigate to parent
