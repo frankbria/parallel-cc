@@ -25,6 +25,10 @@ describe('ConfigManager', () => {
   });
 
   afterEach(() => {
+    // Cancel any pending debounced writes to avoid race conditions with directory cleanup
+    if (configManager) {
+      configManager.cancelPendingWrites();
+    }
     // Clean up test directory
     fs.rmSync(TEST_DIR, { recursive: true, force: true });
   });
@@ -145,6 +149,8 @@ describe('ConfigManager', () => {
 
     it('should persist changes to file', () => {
       configManager.set('budget.monthlyLimit', 50.00);
+      // Flush debounced writes to ensure file is updated
+      configManager.flushSync();
 
       // Read directly from file
       const fileContent = JSON.parse(fs.readFileSync(TEST_CONFIG_PATH, 'utf-8'));
@@ -269,6 +275,8 @@ describe('ConfigManager', () => {
 
     it('should persist budget config to file', () => {
       configManager.setBudgetConfig({ monthlyLimit: 30.00 });
+      // Flush debounced writes to ensure file is updated
+      configManager.flushSync();
 
       // Read directly from file
       const fileContent = JSON.parse(fs.readFileSync(TEST_CONFIG_PATH, 'utf-8'));
@@ -324,6 +332,8 @@ describe('ConfigManager', () => {
     it('should persist deletion to file', () => {
       configManager.set('deleteMe', 'value');
       configManager.delete('deleteMe');
+      // Flush debounced writes to ensure file is updated
+      configManager.flushSync();
 
       // Read directly from file
       const fileContent = JSON.parse(fs.readFileSync(TEST_CONFIG_PATH, 'utf-8'));
@@ -381,10 +391,16 @@ describe('ConfigManager', () => {
     it('should preserve config across instances', () => {
       const configManager1 = new ConfigManager(TEST_CONFIG_PATH);
       configManager1.set('persistent', 'value');
+      // Flush to ensure file is written before creating second instance
+      configManager1.flushSync();
 
       const configManager2 = new ConfigManager(TEST_CONFIG_PATH);
 
       expect(configManager2.get('persistent')).toBe('value');
+
+      // Clean up both instances
+      configManager1.cancelPendingWrites();
+      configManager2.cancelPendingWrites();
     });
 
     it('should write valid JSON', () => {
@@ -393,6 +409,8 @@ describe('ConfigManager', () => {
         nested: { deep: { value: 'test' } },
         array: [1, 2, 3]
       });
+      // Flush to ensure file is written
+      configManager.flushSync();
 
       // Should not throw when parsing
       const content = fs.readFileSync(TEST_CONFIG_PATH, 'utf-8');
@@ -402,6 +420,8 @@ describe('ConfigManager', () => {
     it('should format JSON with indentation for readability', () => {
       configManager = new ConfigManager(TEST_CONFIG_PATH);
       configManager.set('test', 'value');
+      // Flush to ensure file is written
+      configManager.flushSync();
 
       const content = fs.readFileSync(TEST_CONFIG_PATH, 'utf-8');
 
@@ -419,7 +439,8 @@ describe('ConfigManager', () => {
       expect(DEFAULT_BUDGET_CONFIG).toEqual({
         monthlyLimit: undefined,
         perSessionDefault: undefined,
-        warningThresholds: [0.5, 0.8]
+        warningThresholds: [0.5, 0.8],
+        e2bHourlyRate: 0.10
       });
     });
   });

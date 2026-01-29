@@ -37,6 +37,8 @@ describe('BudgetTracker', () => {
   });
 
   afterEach(() => {
+    // Cancel any pending debounced writes to avoid race conditions with directory cleanup
+    configManager.cancelPendingWrites();
     // Close database and clean up
     db.close();
     fs.rmSync(TEST_DIR, { recursive: true, force: true });

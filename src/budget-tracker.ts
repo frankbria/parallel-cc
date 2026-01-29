@@ -52,11 +52,17 @@ export interface SessionBudgetValidation {
  * - Budget limit enforcement with configurable thresholds
  * - Session cost recording
  * - Budget status reports
+ *
+ * Note: Uses integer percentages (0-100) internally for Set keys
+ * to avoid floating-point precision issues.
  */
 export class BudgetTracker {
   private db: SessionDB;
   private configManager: ConfigManager;
+  // Use integer percentages (0-100) as Set keys to avoid float precision issues
   private warningsIssued: Set<number> = new Set();
+  // Track current period to reset warnings on period rollover
+  private currentPeriodKey: string | null = null;
 
   constructor(db: SessionDB, configManager: ConfigManager) {
     this.db = db;
@@ -66,9 +72,19 @@ export class BudgetTracker {
   /**
    * Calculate the start date for a given period
    *
+   * **IMPORTANT: UTC-based calculation**
+   * All period calculations use UTC dates to ensure consistency across timezones.
+   * This means:
+   * - Daily periods reset at midnight UTC (not local time)
+   * - Weekly periods start on Monday UTC
+   * - Monthly periods start on the 1st UTC
+   *
+   * Users in different timezones may see period boundaries at different local times.
+   * For example, a user in PST (-8) will see daily periods reset at 4pm local time.
+   *
    * @param period - Budget period type
    * @param date - Reference date (default: now)
-   * @returns ISO date string (YYYY-MM-DD)
+   * @returns ISO date string (YYYY-MM-DD) in UTC
    */
   getPeriodStart(period: BudgetPeriod, date: Date = new Date()): string {
     const year = date.getUTCFullYear();
@@ -99,12 +115,23 @@ export class BudgetTracker {
   /**
    * Get or create a budget tracking record for the current period
    *
+   * Automatically resets warning tracking when the period rolls over
+   * to a new time window.
+   *
    * @param period - Budget period type
    * @returns Budget tracking record
    */
   getOrCreatePeriodRecord(period: BudgetPeriod): BudgetTracking {
     const periodStart = this.getPeriodStart(period);
     const budgetConfig = this.configManager.getBudgetConfig();
+
+    // Check for period rollover and reset warnings if needed
+    const periodKey = `${period}:${periodStart}`;
+    if (this.currentPeriodKey !== null && this.currentPeriodKey !== periodKey) {
+      // Period has rolled over - reset warning tracking
+      this.warningsIssued.clear();
+    }
+    this.currentPeriodKey = periodKey;
 
     // Get budget limit for this period type
     let budgetLimit: number | undefined;
@@ -258,6 +285,9 @@ export class BudgetTracker {
   /**
    * Check if any warning thresholds have been crossed
    *
+   * Uses integer percentages (0-100) for Set keys to avoid
+   * floating-point precision issues with values like 0.8.
+   *
    * @returns Warning info if threshold crossed, null otherwise
    */
   checkWarningThresholds(): BudgetThresholdWarning | null {
@@ -275,8 +305,10 @@ export class BudgetTracker {
 
     // Find the highest threshold that has been crossed but not yet warned about
     for (const threshold of thresholds) {
-      if (percentUsed >= threshold && !this.warningsIssued.has(threshold)) {
-        this.warningsIssued.add(threshold);
+      // Convert to integer percentage (0-100) for reliable Set lookup
+      const thresholdInt = Math.round(threshold * 100);
+      if (percentUsed >= threshold && !this.warningsIssued.has(thresholdInt)) {
+        this.warningsIssued.add(thresholdInt);
 
         return {
           threshold,

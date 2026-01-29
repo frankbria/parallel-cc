@@ -15,7 +15,8 @@ import type { BudgetConfig } from './types.js';
 export const DEFAULT_BUDGET_CONFIG: BudgetConfig = {
   monthlyLimit: undefined,
   perSessionDefault: undefined,
-  warningThresholds: [0.5, 0.8]
+  warningThresholds: [0.5, 0.8],
+  e2bHourlyRate: 0.10 // Default E2B pricing: $0.10/hour
 };
 
 /**
@@ -42,11 +43,14 @@ export const DEFAULT_CONFIG_PATH = pathJoin(homedir(), '.parallel-cc', 'config.j
  * - JSON file storage with automatic directory creation
  * - Dot notation support for nested keys (e.g., "budget.monthlyLimit")
  * - Validation for budget-related settings
- * - Automatic persistence on changes
+ * - Debounced writes to avoid excessive disk I/O during rapid changes
  */
 export class ConfigManager {
   private configPath: string;
   private config: Config;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly debounceMs: number = 100; // 100ms debounce window
+  private pendingSave: boolean = false;
 
   /**
    * Create a new ConfigManager
@@ -109,11 +113,58 @@ export class ConfigManager {
   }
 
   /**
-   * Save config to file
+   * Save config to file (debounced to avoid excessive I/O)
+   *
+   * Multiple rapid calls will be batched into a single write.
+   * Use flushSync() to force immediate write when needed.
    */
   private save(config?: Config): void {
     const toSave = config ?? this.config;
-    writeFileSync(this.configPath, JSON.stringify(toSave, null, 2));
+    this.config = toSave;
+    this.pendingSave = true;
+
+    // Clear existing timer if any
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+
+    // Schedule debounced write
+    this.saveTimer = setTimeout(() => {
+      this.flushSync();
+    }, this.debounceMs);
+  }
+
+  /**
+   * Immediately flush pending config changes to disk (synchronous)
+   *
+   * Call this when you need to ensure config is persisted immediately,
+   * such as before process exit.
+   */
+  flushSync(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+
+    if (this.pendingSave) {
+      // Only write if directory still exists (handles test cleanup race conditions)
+      const dir = dirname(this.configPath);
+      if (existsSync(dir)) {
+        writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
+      }
+      this.pendingSave = false;
+    }
+  }
+
+  /**
+   * Cancel any pending writes (for cleanup/testing)
+   */
+  cancelPendingWrites(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.pendingSave = false;
   }
 
   /**

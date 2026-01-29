@@ -622,6 +622,8 @@ export interface BudgetConfig {
   perSessionDefault?: number;
   /** Warning thresholds as percentages (e.g., [0.5, 0.8] for 50% and 80%) */
   warningThresholds?: number[];
+  /** E2B hourly rate in USD (default: 0.10) - allows updating if pricing changes */
+  e2bHourlyRate?: number;
 }
 
 /**

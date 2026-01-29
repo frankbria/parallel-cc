@@ -31,9 +31,11 @@ export interface TemplateApplicationResult {
   error?: string;
 }
 
-// Extended config type with budget thresholds
+// Extended config type with budget thresholds and pricing
 interface ExtendedE2BSessionConfig extends E2BSessionConfig {
   budgetWarningThresholds?: number[];
+  /** E2B hourly rate in USD - allows updating if pricing changes */
+  e2bHourlyRate?: number;
 }
 
 // Default configuration
@@ -44,7 +46,8 @@ const DEFAULT_CONFIG: Required<ExtendedE2BSessionConfig> = {
   sandboxImage: (envTemplate && envTemplate.length > 0) ? envTemplate : 'anthropic-claude-code', // E2B template with pre-installed Claude Code
   timeoutMinutes: 60,
   warningThresholds: [30, 50],
-  budgetWarningThresholds: [0.5, 0.8] // Default: warn at 50% and 80% of budget
+  budgetWarningThresholds: [0.5, 0.8], // Default: warn at 50% and 80% of budget
+  e2bHourlyRate: 0.10 // Default E2B pricing: $0.10/hour (configurable if pricing changes)
 };
 
 // Security constants
@@ -425,11 +428,14 @@ export class SandboxManager {
       }
 
       // Check soft warning thresholds
+      // Uses integer percentages (0-100) for Set keys to avoid float precision issues
       const thresholds = this.config.budgetWarningThresholds.sort((a, b) => b - a); // Sort descending
 
       for (const threshold of thresholds) {
-        if (percentUsed >= threshold && !warningsIssued.has(threshold)) {
-          warningsIssued.add(threshold);
+        // Convert to integer percentage (0-100) for reliable Set lookup
+        const thresholdInt = Math.round(threshold * 100);
+        if (percentUsed >= threshold && !warningsIssued.has(thresholdInt)) {
+          warningsIssued.add(thresholdInt);
           this.budgetWarningsIssued.set(sandboxId, warningsIssued);
 
           const warning: BudgetWarning = {
@@ -462,12 +468,13 @@ export class SandboxManager {
   /**
    * Calculate estimated cost as a number (for budget calculations)
    *
+   * Uses configurable hourly rate to allow updating when E2B pricing changes.
+   *
    * @param elapsedMinutes - Elapsed minutes
    * @returns Estimated cost in USD
    */
   private calculateEstimatedCostNumeric(elapsedMinutes: number): number {
-    // E2B pricing: ~$0.10/hour for basic compute
-    const costPerMinute = 0.10 / 60;
+    const costPerMinute = this.config.e2bHourlyRate / 60;
     return elapsedMinutes * costPerMinute;
   }
 
@@ -630,13 +637,13 @@ export class SandboxManager {
   /**
    * Calculate estimated cost based on elapsed time
    *
+   * Uses configurable hourly rate to allow updating when E2B pricing changes.
+   *
    * @param elapsedMinutes - Elapsed minutes
    * @returns Estimated cost string (e.g., "$0.50")
    */
   private calculateEstimatedCost(elapsedMinutes: number): string {
-    // E2B pricing: ~$0.10/hour for basic compute
-    const costPerMinute = 0.10 / 60;
-    const estimatedCost = elapsedMinutes * costPerMinute;
+    const estimatedCost = this.calculateEstimatedCostNumeric(elapsedMinutes);
     return `$${estimatedCost.toFixed(2)}`;
   }
 
