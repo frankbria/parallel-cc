@@ -98,11 +98,12 @@ export class ConfigManager {
       const parsed = JSON.parse(content);
 
       // Merge with defaults to ensure all required fields exist
+      // Use structuredClone to prevent shared references (e.g., warningThresholds array)
       return {
         ...structuredClone(DEFAULT_CONFIG),
         ...parsed,
         budget: {
-          ...DEFAULT_BUDGET_CONFIG,
+          ...structuredClone(DEFAULT_BUDGET_CONFIG),
           ...parsed.budget
         }
       };
@@ -147,10 +148,13 @@ export class ConfigManager {
     }
 
     if (this.pendingSave) {
-      // Only write if directory still exists (handles test cleanup race conditions)
-      const dir = dirname(this.configPath);
-      if (existsSync(dir)) {
+      try {
         writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
+      } catch (err) {
+        // Ignore ENOENT if directory was removed (e.g., test cleanup race conditions)
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw err;
+        }
       }
       this.pendingSave = false;
     }
@@ -320,6 +324,13 @@ export class ConfigManager {
         if (threshold < 0 || threshold > 1) {
           throw new Error('Warning thresholds must be between 0 and 1');
         }
+      }
+    }
+
+    // Validate e2bHourlyRate
+    if (config.e2bHourlyRate !== undefined && config.e2bHourlyRate !== null) {
+      if (config.e2bHourlyRate < 0) {
+        throw new Error('E2B hourly rate must be a non-negative number');
       }
     }
 

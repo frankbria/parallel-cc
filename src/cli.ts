@@ -3048,8 +3048,12 @@ configCmd
       if (normalizedKey.includes('budget')) {
         // Budget values are numbers or arrays
         if (normalizedKey.includes('Thresholds')) {
-          // Parse as array of numbers
-          parsedValue = value.split(',').map(v => parseFloat(v.trim()));
+          // Parse as array of numbers with NaN validation
+          const parsed = value.split(',').map(v => parseFloat(v.trim()));
+          if (parsed.some(v => isNaN(v))) {
+            throw new Error(`Invalid threshold value in: ${value}`);
+          }
+          parsedValue = parsed;
         } else {
           // Parse as number
           parsedValue = parseFloat(value);
@@ -3136,9 +3140,9 @@ configCmd
         // Display budget config
         console.log(chalk.cyan('Budget Settings:'));
         const budget = config.budget;
-        console.log(`  monthly-limit: ${budget.monthlyLimit !== undefined ? `$${budget.monthlyLimit.toFixed(2)}` : chalk.dim('(not set)')}`);
-        console.log(`  per-session-default: ${budget.perSessionDefault !== undefined ? `$${budget.perSessionDefault.toFixed(2)}` : chalk.dim('(not set)')}`);
-        console.log(`  warning-thresholds: ${budget.warningThresholds ? budget.warningThresholds.map(t => `${(t * 100).toFixed(0)}%`).join(', ') : chalk.dim('(not set)')}`);
+        console.log(`  monthly-limit: ${typeof budget.monthlyLimit === 'number' ? `$${budget.monthlyLimit.toFixed(2)}` : chalk.dim('(not set)')}`);
+        console.log(`  per-session-default: ${typeof budget.perSessionDefault === 'number' ? `$${budget.perSessionDefault.toFixed(2)}` : chalk.dim('(not set)')}`);
+        console.log(`  warning-thresholds: ${Array.isArray(budget.warningThresholds) ? budget.warningThresholds.map(t => `${(t * 100).toFixed(0)}%`).join(', ') : chalk.dim('(not set)')}`);
 
         // Display other config keys
         const otherKeys = Object.keys(config).filter(k => k !== 'budget');
@@ -3186,7 +3190,18 @@ program
       const configManager = new ConfigManager();
       const tracker = new BudgetTracker(db, configManager);
 
-      const period = options.period as 'daily' | 'weekly' | 'monthly';
+      // Validate period option
+      const allowedPeriods = ['daily', 'weekly', 'monthly'] as const;
+      if (!allowedPeriods.includes(options.period)) {
+        const message = `Invalid period: ${options.period}. Use daily, weekly, or monthly.`;
+        if (options.json) {
+          console.log(JSON.stringify({ error: message }));
+        } else {
+          console.error(chalk.red(`✗ ${message}`));
+        }
+        process.exit(1);
+      }
+      const period = options.period as typeof allowedPeriods[number];
       const status = tracker.generateBudgetStatus(period);
 
       if (options.json) {
@@ -3204,7 +3219,9 @@ program
           const remaining = status.currentPeriod.remaining ?? 0;
           const remainingColor = remaining > status.currentPeriod.limit * 0.2 ? chalk.green : chalk.yellow;
           console.log(`  Remaining: ${remainingColor(`$${remaining.toFixed(2)}`)}`);
-          const percentUsed = (status.currentPeriod.spent / status.currentPeriod.limit) * 100;
+          const percentUsed = status.currentPeriod.limit > 0
+            ? (status.currentPeriod.spent / status.currentPeriod.limit) * 100
+            : 0;
           console.log(`  Usage: ${percentUsed.toFixed(1)}%`);
         } else {
           console.log(chalk.dim('  Limit: (not set)'));
