@@ -4,7 +4,7 @@
  * Handles persistent user settings stored in ~/.parallel-cc/config.json
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join as pathJoin } from 'path';
 import { homedir } from 'os';
 import type { BudgetConfig } from './types.js';
@@ -107,8 +107,16 @@ export class ConfigManager {
           ...parsed.budget
         }
       };
-    } catch {
-      // Invalid JSON - return defaults
+    } catch (err) {
+      // Invalid JSON - backup corrupted file and return defaults
+      const backupPath = `${this.configPath}.corrupted.${Date.now()}`;
+      try {
+        copyFileSync(this.configPath, backupPath);
+        console.error(`Warning: Config file had invalid JSON. Backed up to: ${backupPath}`);
+      } catch {
+        // Backup failed - just warn
+        console.error(`Warning: Config file has invalid JSON and could not be backed up: ${(err as Error).message}`);
+      }
       return structuredClone(DEFAULT_CONFIG);
     }
   }
