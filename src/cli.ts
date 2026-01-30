@@ -42,7 +42,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
-import { SandboxStatus, type E2BSession, type StatusResult, type SessionInfo } from './types.js';
+import { SandboxStatus, type BudgetConfig, type E2BSession, type StatusResult, type SessionInfo } from './types.js';
 
 program
   .name('parallel-cc')
@@ -3069,7 +3069,14 @@ configCmd
         parsedValue = value;
       }
 
-      configManager.set(normalizedKey, parsedValue);
+      // Route budget keys through setBudgetConfig() for validation
+      if (normalizedKey.startsWith('budget.')) {
+        const budgetKey = normalizedKey.replace(/^budget\./, '');
+        const budgetConfig = { [budgetKey]: parsedValue } as Partial<BudgetConfig>;
+        configManager.setBudgetConfig(budgetConfig);
+      } else {
+        configManager.set(normalizedKey, parsedValue);
+      }
 
       if (options.json) {
         console.log(JSON.stringify({ success: true, key: normalizedKey, value: parsedValue }));
