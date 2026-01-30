@@ -11,11 +11,13 @@ import { Sandbox } from 'e2b';
 import type { Logger } from '../logger.js';
 import {
   SandboxStatus,
+  BudgetExceededError,
   type E2BSessionConfig,
   type SandboxHealthCheck,
   type SandboxTerminationResult,
   type TimeoutWarning,
-  type SandboxTemplate
+  type SandboxTemplate,
+  type BudgetWarning
 } from '../types.js';
 
 /**
@@ -29,14 +31,23 @@ export interface TemplateApplicationResult {
   error?: string;
 }
 
+// Extended config type with budget thresholds and pricing
+interface ExtendedE2BSessionConfig extends E2BSessionConfig {
+  budgetWarningThresholds?: number[];
+  /** E2B hourly rate in USD - allows updating if pricing changes */
+  e2bHourlyRate?: number;
+}
+
 // Default configuration
 const envTemplate = process.env.E2B_TEMPLATE?.trim();
-const DEFAULT_CONFIG: Required<E2BSessionConfig> = {
+const DEFAULT_CONFIG: Required<ExtendedE2BSessionConfig> = {
   claudeVersion: 'latest',
   e2bSdkVersion: '1.13.2',
   sandboxImage: (envTemplate && envTemplate.length > 0) ? envTemplate : 'anthropic-claude-code', // E2B template with pre-installed Claude Code
   timeoutMinutes: 60,
-  warningThresholds: [30, 50]
+  warningThresholds: [30, 50],
+  budgetWarningThresholds: [0.5, 0.8], // Default: warn at 50% and 80% of budget
+  e2bHourlyRate: 0.10 // Default E2B pricing: $0.10/hour (configurable if pricing changes)
 };
 
 // Security constants
@@ -104,13 +115,16 @@ export function validateFilePath(path: string): boolean {
  * - Graceful termination and cleanup
  */
 export class SandboxManager {
-  private config: Required<E2BSessionConfig>;
+  private config: Required<ExtendedE2BSessionConfig>;
   private logger: Logger;
   private activeSandboxes: Map<string, Sandbox> = new Map();
   private sandboxStartTimes: Map<string, Date> = new Map();
   private timeoutWarningsIssued: Map<string, Set<number>> = new Map();
+  // Budget tracking (v1.1)
+  private budgetLimits: Map<string, number> = new Map();
+  private budgetWarningsIssued: Map<string, Set<number>> = new Map();
 
-  constructor(logger: Logger, config: Partial<E2BSessionConfig> = {}) {
+  constructor(logger: Logger, config: Partial<ExtendedE2BSessionConfig> = {}) {
     this.logger = logger;
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
@@ -335,6 +349,135 @@ export class SandboxManager {
     }
   }
 
+  // ============================================================================
+  // Budget Enforcement (v1.1)
+  // ============================================================================
+
+  /**
+   * Set budget limit for a sandbox
+   *
+   * @param sandboxId - Sandbox ID
+   * @param limit - Budget limit in USD
+   * @throws Error if limit is negative
+   */
+  setBudgetLimit(sandboxId: string, limit: number): void {
+    if (limit < 0) {
+      throw new Error('Budget limit must be a positive number');
+    }
+    this.budgetLimits.set(sandboxId, limit);
+    this.budgetWarningsIssued.set(sandboxId, new Set());
+    this.logger.info(`Set budget limit $${limit.toFixed(2)} for sandbox ${sandboxId}`);
+  }
+
+  /**
+   * Get budget limit for a sandbox
+   *
+   * @param sandboxId - Sandbox ID
+   * @returns Budget limit or undefined if not set
+   */
+  getBudgetLimit(sandboxId: string): number | undefined {
+    return this.budgetLimits.get(sandboxId);
+  }
+
+  /**
+   * Check budget limit and issue warnings or terminate if exceeded
+   *
+   * @param sandboxId - Sandbox ID to check
+   * @returns Budget warning if threshold reached, null otherwise
+   * @throws BudgetExceededError if budget is exceeded
+   */
+  async checkBudgetLimit(sandboxId: string): Promise<BudgetWarning | null> {
+    try {
+      const budgetLimit = this.budgetLimits.get(sandboxId);
+
+      // No budget limit set or zero (disabled)
+      if (budgetLimit === undefined || budgetLimit === 0) {
+        return null;
+      }
+
+      const startTime = this.sandboxStartTimes.get(sandboxId);
+      if (!startTime) {
+        this.logger.warn(`Start time not found for sandbox ${sandboxId}, cannot check budget`);
+        return null;
+      }
+
+      // Calculate current cost
+      const elapsedMinutes = Math.floor((Date.now() - startTime.getTime()) / 60000);
+      const currentCost = this.calculateEstimatedCostNumeric(elapsedMinutes);
+      const percentUsed = currentCost / budgetLimit;
+
+      const warningsIssued = this.budgetWarningsIssued.get(sandboxId) || new Set();
+
+      // Hard limit enforcement (budget exceeded)
+      if (currentCost >= budgetLimit) {
+        const warning: BudgetWarning = {
+          sandboxId,
+          currentCost,
+          budgetLimit,
+          percentUsed,
+          warningLevel: 'hard',
+          message: `BUDGET EXCEEDED: Sandbox has used $${currentCost.toFixed(2)} of $${budgetLimit.toFixed(2)} budget (${(percentUsed * 100).toFixed(0)}%). Terminating sandbox.`
+        };
+
+        this.logger.error(warning.message);
+
+        // Terminate sandbox
+        await this.terminateSandbox(sandboxId);
+
+        throw new BudgetExceededError(sandboxId, currentCost, budgetLimit);
+      }
+
+      // Check soft warning thresholds
+      // Uses integer percentages (0-100) for Set keys to avoid float precision issues
+      const thresholds = this.config.budgetWarningThresholds.sort((a, b) => b - a); // Sort descending
+
+      for (const threshold of thresholds) {
+        // Convert to integer percentage (0-100) for reliable Set lookup
+        const thresholdInt = Math.round(threshold * 100);
+        if (percentUsed >= threshold && !warningsIssued.has(thresholdInt)) {
+          warningsIssued.add(thresholdInt);
+          this.budgetWarningsIssued.set(sandboxId, warningsIssued);
+
+          const warning: BudgetWarning = {
+            sandboxId,
+            currentCost,
+            budgetLimit,
+            percentUsed,
+            warningLevel: 'soft',
+            message: `Budget warning: ${(percentUsed * 100).toFixed(0)}% of budget used ($${currentCost.toFixed(2)} / $${budgetLimit.toFixed(2)})`
+          };
+
+          this.logger.warn(warning.message);
+          return warning;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      // Re-throw BudgetExceededError
+      if (error instanceof BudgetExceededError) {
+        throw error;
+      }
+
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Budget check failed for sandbox ${sandboxId}: ${errorMsg}`);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate estimated cost as a number (for budget calculations)
+   *
+   * Uses configurable hourly rate to allow updating when E2B pricing changes.
+   *
+   * @param elapsedMinutes - Elapsed minutes
+   * @returns Estimated cost in USD
+   */
+  private calculateEstimatedCostNumeric(elapsedMinutes: number): number {
+    const costPerMinute = this.config.e2bHourlyRate / 60;
+    return elapsedMinutes * costPerMinute;
+  }
+
   /**
    * Terminate a sandbox and cleanup resources
    *
@@ -376,10 +519,12 @@ export class SandboxManager {
         }
       }
 
-      // Cleanup tracking data
+      // Cleanup tracking data (including budget)
       this.activeSandboxes.delete(sandboxId);
       this.sandboxStartTimes.delete(sandboxId);
       this.timeoutWarningsIssued.delete(sandboxId);
+      this.budgetLimits.delete(sandboxId);
+      this.budgetWarningsIssued.delete(sandboxId);
 
       this.logger.info(`E2B sandbox terminated successfully: ${sandboxId}`);
 
@@ -392,10 +537,12 @@ export class SandboxManager {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to terminate sandbox ${sandboxId}: ${errorMsg}`);
 
-      // Best-effort cleanup even on error
+      // Best-effort cleanup even on error (including budget)
       this.activeSandboxes.delete(sandboxId);
       this.sandboxStartTimes.delete(sandboxId);
       this.timeoutWarningsIssued.delete(sandboxId);
+      this.budgetLimits.delete(sandboxId);
+      this.budgetWarningsIssued.delete(sandboxId);
 
       return {
         success: false,
@@ -490,13 +637,13 @@ export class SandboxManager {
   /**
    * Calculate estimated cost based on elapsed time
    *
+   * Uses configurable hourly rate to allow updating when E2B pricing changes.
+   *
    * @param elapsedMinutes - Elapsed minutes
    * @returns Estimated cost string (e.g., "$0.50")
    */
   private calculateEstimatedCost(elapsedMinutes: number): string {
-    // E2B pricing: ~$0.10/hour for basic compute
-    const costPerMinute = 0.10 / 60;
-    const estimatedCost = elapsedMinutes * costPerMinute;
+    const estimatedCost = this.calculateEstimatedCostNumeric(elapsedMinutes);
     return `$${estimatedCost.toFixed(2)}`;
   }
 

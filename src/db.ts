@@ -30,7 +30,10 @@ import type {
   SuggestionFilters,
   E2BSession,
   E2BSessionRow,
-  ExecutionMode
+  ExecutionMode,
+  BudgetTracking,
+  BudgetTrackingRow,
+  BudgetPeriod
 } from './types.js';
 import { SandboxStatus } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
@@ -617,6 +620,21 @@ export class SessionDB {
         WHERE name IN ('git_user', 'git_email', 'ssh_key_provided', 'budget_limit', 'cost_estimate', 'actual_cost', 'template_name')
       `).all() as { name: string }[];
       return columns.length === 7;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if budget_tracking table exists (v1.1)
+   */
+  hasBudgetTrackingTable(): boolean {
+    try {
+      const result = this.db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='budget_tracking'
+      `).get() as { name: string } | undefined;
+      return result !== undefined;
     } catch {
       return false;
     }
@@ -1597,6 +1615,148 @@ export class SessionDB {
       logger.error('Rollback failed', error);
       throw error;
     }
+  }
+
+  // ============================================================================
+  // Budget Tracking (v1.1)
+  // ============================================================================
+
+  /**
+   * Create a new budget tracking record
+   *
+   * @param period - Budget period type (daily, weekly, monthly)
+   * @param periodStart - ISO date string for period start
+   * @param budgetLimit - Optional budget limit for this period
+   * @returns The created budget tracking record
+   */
+  createBudgetTrackingRecord(
+    period: BudgetPeriod,
+    periodStart: string,
+    budgetLimit?: number
+  ): BudgetTracking {
+    const id = randomUUID();
+    const stmt = this.db.prepare(`
+      INSERT INTO budget_tracking (id, period, period_start, budget_limit, spent)
+      VALUES (?, ?, ?, ?, 0)
+      RETURNING *
+    `);
+
+    const row = stmt.get(id, period, periodStart, budgetLimit ?? null) as BudgetTrackingRow;
+    return this.rowToBudgetTracking(row);
+  }
+
+  /**
+   * Get budget tracking record by period and start date
+   *
+   * @param period - Budget period type
+   * @param periodStart - ISO date string for period start
+   * @returns Budget tracking record or null if not found
+   */
+  getBudgetTrackingRecord(period: BudgetPeriod, periodStart: string): BudgetTracking | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM budget_tracking
+      WHERE period = ? AND period_start = ?
+    `);
+    const row = stmt.get(period, periodStart) as BudgetTrackingRow | undefined;
+    return row ? this.rowToBudgetTracking(row) : null;
+  }
+
+  /**
+   * Update spent amount in budget tracking record
+   *
+   * @param id - Budget tracking record ID
+   * @param amount - Amount to add to spent (positive number)
+   * @returns true if record was updated
+   */
+  updateBudgetSpent(id: string, amount: number): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE budget_tracking
+      SET spent = spent + ?
+      WHERE id = ?
+    `);
+    const result = stmt.run(amount, id);
+    return result.changes > 0;
+  }
+
+  /**
+   * Get or create budget tracking record for period
+   *
+   * @param period - Budget period type
+   * @param periodStart - ISO date string for period start
+   * @param budgetLimit - Optional budget limit for new records
+   * @returns Budget tracking record
+   */
+  getOrCreateBudgetTrackingRecord(
+    period: BudgetPeriod,
+    periodStart: string,
+    budgetLimit?: number
+  ): BudgetTracking {
+    const existing = this.getBudgetTrackingRecord(period, periodStart);
+    if (existing) {
+      return existing;
+    }
+    return this.createBudgetTrackingRecord(period, periodStart, budgetLimit);
+  }
+
+  /**
+   * Update session cost estimate
+   *
+   * @param sessionId - Session ID
+   * @param costEstimate - Estimated cost in USD
+   * @param actualCost - Optional actual cost in USD
+   * @returns true if session was updated
+   */
+  updateSessionCost(
+    sessionId: string,
+    costEstimate: number,
+    actualCost?: number
+  ): boolean {
+    let query = `UPDATE sessions SET cost_estimate = ?`;
+    const params: unknown[] = [costEstimate];
+
+    if (actualCost !== undefined) {
+      query += `, actual_cost = ?`;
+      params.push(actualCost);
+    }
+
+    query += ` WHERE id = ?`;
+    params.push(sessionId);
+
+    const stmt = this.db.prepare(query);
+    const result = stmt.run(...params);
+    return result.changes > 0;
+  }
+
+  /**
+   * Get all budget tracking records for a period type
+   *
+   * @param period - Budget period type
+   * @param limit - Maximum number of records to return (default: 10)
+   * @returns Array of budget tracking records, ordered by period_start DESC
+   */
+  getBudgetTrackingHistory(period: BudgetPeriod, limit: number = 10): BudgetTracking[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM budget_tracking
+      WHERE period = ?
+      ORDER BY period_start DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(period, limit) as BudgetTrackingRow[];
+    return rows.map(row => this.rowToBudgetTracking(row));
+  }
+
+  /**
+   * Convert budget tracking row to model
+   */
+  private rowToBudgetTracking(row: BudgetTrackingRow): BudgetTracking {
+    return {
+      id: row.id,
+      period: row.period,
+      periodStart: row.period_start,
+      budgetLimit: row.budget_limit ?? undefined,
+      spent: row.spent,
+      createdAt: row.created_at
+    };
   }
 
   close(): void {
