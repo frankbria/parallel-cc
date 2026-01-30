@@ -381,6 +381,11 @@ CREATE INDEX idx_budget_period ON budget_tracking(period, period_start);
 | `templates delete <name>` | Delete a custom template (v1.1) |
 | `templates export <name>` | Export a template to JSON (v1.1) |
 | `templates import` | Import a template from JSON (v1.1) |
+| `config set <key> <value>` | Set a configuration value (v1.1) |
+| `config get <key>` | Get a configuration value (v1.1) |
+| `config list` | Display all configuration values (v1.1) |
+| `budget status` | Show budget and spending status (v1.1) |
+| `budget-status` | Alias for `budget status` (backward compat) |
 
 ## MCP Server Tools (v0.4)
 

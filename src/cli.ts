@@ -3172,18 +3172,13 @@ configCmd
   });
 
 // ============================================================================
-// Budget Status Command (v1.1)
+// Budget Commands (v1.1)
 // ============================================================================
 
 /**
- * Budget status command - Show spending and budget information
+ * Shared action handler for budget status command
  */
-program
-  .command('budget-status')
-  .description('Show budget and spending status (v1.1)')
-  .option('--period <period>', 'Show specific period (daily, weekly, monthly)', 'monthly')
-  .option('--json', 'Output as JSON')
-  .action(async (options) => {
+async function budgetStatusAction(options: { period: string; json?: boolean }) {
     let db: SessionDB | null = null;
     try {
       db = new SessionDB();
@@ -3198,7 +3193,7 @@ program
       const tracker = new BudgetTracker(db, configManager);
 
       // Validate period option
-      const allowedPeriods = ['daily', 'weekly', 'monthly'] as const;
+      const allowedPeriods: readonly string[] = ['daily', 'weekly', 'monthly'];
       if (!allowedPeriods.includes(options.period)) {
         const message = `Invalid period: ${options.period}. Use daily, weekly, or monthly.`;
         if (options.json) {
@@ -3208,7 +3203,7 @@ program
         }
         process.exit(1);
       }
-      const period = options.period as typeof allowedPeriods[number];
+      const period = options.period as 'daily' | 'weekly' | 'monthly';
       const status = tracker.generateBudgetStatus(period);
 
       if (options.json) {
@@ -3267,7 +3262,29 @@ program
         db.close();
       }
     }
-  });
+}
+
+/**
+ * Budget command group - Manage budget settings and view status
+ */
+const budgetCmd = program
+  .command('budget')
+  .description('Manage budget settings and view status (v1.1)');
+
+budgetCmd
+  .command('status')
+  .description('Show budget and spending status')
+  .option('--period <period>', 'Show specific period (daily, weekly, monthly)', 'monthly')
+  .option('--json', 'Output as JSON')
+  .action(budgetStatusAction);
+
+// Backward compatibility alias: budget-status -> budget status
+program
+  .command('budget-status')
+  .description('Show budget and spending status (alias for "budget status")')
+  .option('--period <period>', 'Show specific period (daily, weekly, monthly)', 'monthly')
+  .option('--json', 'Output as JSON')
+  .action(budgetStatusAction);
 
 // Parse and execute
 program.parse();
