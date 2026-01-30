@@ -45,11 +45,15 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Clear git credentials to avoid duplicate auth
+      - name: Configure git identity and clear credentials
         if: |
           github.event.pull_request.changed_files >= 5 ||
           steps.calc.outputs.total >= 20
         run: |
+          # Set git identity for the OpenCode action (required for any git operations)
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
           # Clear all GitHub-related git config to prevent auth conflicts
           git config --global --unset-all http.https://github.com/.extraheader || true
           git config --local --unset-all http.https://github.com/.extraheader || true
