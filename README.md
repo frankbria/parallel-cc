@@ -1,7 +1,7 @@
 # parallel-cc
 
 [![Follow on X](https://img.shields.io/twitter/follow/FrankBria18044?style=social)](https://x.com/FrankBria18044)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -244,10 +244,10 @@ parallel-cc cleanup                      # Clean up stale sessions
 ### Merge & Conflict Management
 ```bash
 # Merge detection
-parallel-cc watch-merges                 # Start merge detection daemon
-parallel-cc watch-merges --once          # Run single merge detection poll
-parallel-cc merge-status                 # Show merge events history
-parallel-cc merge-status --subscriptions # Show active merge subscriptions
+parallel-cc watch merges                 # Start merge detection daemon
+parallel-cc watch merges --once          # Run single merge detection poll
+parallel-cc merge status                 # Show merge events history
+parallel-cc merge status --subscriptions # Show active merge subscriptions
 
 # File claims & conflict resolution
 parallel-cc claims                       # List active file claims
@@ -261,31 +261,31 @@ parallel-cc suggestions --min-confidence 0.8  # Filter by confidence threshold
 ### E2B Sandbox Execution
 ```bash
 # Run Claude Code in cloud sandbox
-parallel-cc sandbox-run --repo . --prompt "Implement feature X"
-parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+parallel-cc sandbox run --repo . --prompt "Implement feature X"
+parallel-cc sandbox run --repo . --prompt-file PLAN.md
 
 # Authentication options
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method api-key  # Use ANTHROPIC_API_KEY
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method oauth    # Use Claude subscription
+parallel-cc sandbox run --repo . --prompt "Fix bug" --auth-method api-key  # Use ANTHROPIC_API_KEY
+parallel-cc sandbox run --repo . --prompt "Fix bug" --auth-method oauth    # Use Claude subscription
 
 # Branch management
-parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
-parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch name
-parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
+parallel-cc sandbox run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
+parallel-cc sandbox run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch name
+parallel-cc sandbox run --repo . --prompt "Refactor"                                # Default: uncommitted changes
 
 # Git Live mode - Push and create PR automatically
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-live
-parallel-cc sandbox-run --repo . --prompt "Add feature" --git-live --target-branch develop
-parallel-cc sandbox-run --repo . --prompt "Fix #42" --git-live --branch feature/issue-42
+parallel-cc sandbox run --repo . --prompt "Fix bug" --git-live
+parallel-cc sandbox run --repo . --prompt "Add feature" --git-live --target-branch develop
+parallel-cc sandbox run --repo . --prompt "Fix #42" --git-live --branch feature/issue-42
 
 # Monitoring & control
-parallel-cc sandbox-logs --session-id <id>       # View sandbox logs
-parallel-cc sandbox-logs --session-id <id> --follow  # Stream logs in real-time
-parallel-cc sandbox-download --session-id <id>   # Download results without terminating
-parallel-cc sandbox-kill --session-id <id>       # Terminate running sandbox
+parallel-cc sandbox logs --session-id <id>       # View sandbox logs
+parallel-cc sandbox logs --session-id <id> --follow  # Stream logs in real-time
+parallel-cc sandbox download --session-id <id>   # Download results without terminating
+parallel-cc sandbox kill --session-id <id>       # Terminate running sandbox
 
 # Testing
-parallel-cc sandbox-run --dry-run --repo .       # Test setup without execution
+parallel-cc sandbox run --dry-run --repo .       # Test setup without execution
 ```
 
 ## 🔄 How Sessions Work
@@ -346,7 +346,7 @@ claude  # Create PLAN.md with implementation steps
 git commit PLAN.md -m "plan: feature implementation"
 
 # Step 2: Execute autonomously (E2B sandbox)
-parallel-cc sandbox-run --repo . --prompt "Execute PLAN.md with TDD approach"
+parallel-cc sandbox run --repo . --prompt "Execute PLAN.md with TDD approach"
 # Walk away - Claude works unattended for 30+ minutes in isolated sandbox
 
 # Step 3: Review results
@@ -369,7 +369,7 @@ git push origin HEAD:feature/my-feature
 
 **1. Uncommitted Changes (Default)**
 ```bash
-parallel-cc sandbox-run --repo . --prompt "Fix issue #84"
+parallel-cc sandbox run --repo . --prompt "Fix issue #84"
 # Results downloaded as uncommitted tracked files
 # Full control: review with git status/diff, then commit manually
 ```
@@ -381,7 +381,7 @@ parallel-cc sandbox-run --repo . --prompt "Fix issue #84"
 
 **2. Auto-Generated Branch**
 ```bash
-parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch auto
+parallel-cc sandbox run --repo . --prompt "Fix issue #84" --branch auto
 # Creates: e2b/fix-issue-84-2025-12-13-23-45
 # Auto-commits with descriptive message
 ```
@@ -393,7 +393,7 @@ parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch auto
 
 **3. Custom Branch Name**
 ```bash
-parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch feature/issue-84
+parallel-cc sandbox run --repo . --prompt "Fix issue #84" --branch feature/issue-84
 # Creates specified branch and commits
 ```
 
@@ -411,13 +411,13 @@ Git Live Mode (`--git-live`) pushes results directly to a remote feature branch 
 **Quick Example:**
 ```bash
 # Basic git-live: Push and create PR automatically
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-live
+parallel-cc sandbox run --repo . --prompt "Fix bug" --git-live
 
 # With custom target branch (default: main)
-parallel-cc sandbox-run --repo . --prompt "Add feature" --git-live --target-branch develop
+parallel-cc sandbox run --repo . --prompt "Add feature" --git-live --target-branch develop
 
 # Full example with all options
-parallel-cc sandbox-run \
+parallel-cc sandbox run \
   --repo . \
   --prompt "Implement auth system" \
   --auth-method oauth \
@@ -462,7 +462,7 @@ When `--git-live` is used with multiple parallel sessions active, you'll see a w
 **1. API Key Authentication (Default)**
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
-parallel-cc sandbox-run --repo . --prompt "Task" --auth-method api-key
+parallel-cc sandbox run --repo . --prompt "Task" --auth-method api-key
 ```
 
 **2. OAuth Authentication**
@@ -472,27 +472,27 @@ claude
 /login  # Follow prompts
 
 # Then use OAuth mode
-parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
+parallel-cc sandbox run --repo . --prompt "Task" --auth-method oauth
 ```
 
 ### Usage Examples
 
 ```bash
 # Basic execution with TDD approach
-parallel-cc sandbox-run --repo . --prompt "Implement feature X with tests"
+parallel-cc sandbox run --repo . --prompt "Implement feature X with tests"
 
 # Execute from plan file
-parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+parallel-cc sandbox run --repo . --prompt-file PLAN.md
 
 # Full example with OAuth and auto branch
-parallel-cc sandbox-run \
+parallel-cc sandbox run \
   --repo . \
   --prompt "Implement auth system" \
   --auth-method oauth \
   --branch auto
 
 # Git Live mode with custom branch
-parallel-cc sandbox-run \
+parallel-cc sandbox run \
   --repo . \
   --prompt "Fix issue #123" \
   --git-live \
@@ -511,8 +511,23 @@ parallel-cc sandbox-run \
 5. **Cost Awareness**: E2B charges ~$0.10/hour for sandbox compute time
 
 See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and troubleshooting.
+See [docs/REFERENCE.md](./docs/REFERENCE.md) for database schema, MCP tools, and technical specifications.
 
 ## 🎉 What's New
+
+### v2.0.0 - CLI Modernization (February 2026)
+
+**Breaking Changes:**
+- 🔄 **Subcommand Structure** - Commands now use proper subcommand format
+  - `sandbox run` instead of `sandbox-run`
+  - `mcp serve` instead of `mcp-serve`
+  - `watch merges` instead of `watch-merges`
+  - Old hyphenated commands still work with deprecation warnings
+  - Will be removed in v3.0.0
+
+**New Features:**
+- 💰 **Budget Tracking** - Set daily/weekly/monthly spending limits
+- ⚙️ **Config Management** - `config set/get/list` commands for settings
 
 ### v1.0.0 - Git Live Mode & Enhanced Branch Management (December 2024)
 
@@ -559,7 +574,7 @@ See [ROADMAP.md](./ROADMAP.md) for detailed version history and future plans.
 
 ## 🗺️ Roadmap
 
-### Current Version: v1.0 🚀
+### Current Version: v2.0 🚀
 
 **Core Features:**
 - ✅ Parallel worktree coordination with automatic session management
@@ -570,18 +585,19 @@ See [ROADMAP.md](./ROADMAP.md) for detailed version history and future plans.
 - ✅ AI-powered auto-fix suggestions with confidence scoring
 - ✅ E2B sandbox integration for autonomous execution
 - ✅ Plan-driven workflows with real-time monitoring
-- ✅ Intelligent file sync and cost tracking
 - ✅ Git Live mode for autonomous PR creation
-- ✅ Enhanced branch management with auto-generation
+- ✅ Sandbox templates (Node.js, Python, Next.js)
+- ✅ SSH key injection for private repositories
+- ✅ Budget tracking and cost controls
+- ✅ Modern subcommand CLI structure
 
 ### What's Next
 
-**v1.1 - Enhanced E2B Features** (Planned)
+**v2.1 - Enhanced Sandbox Features** (Planned)
 - [ ] Parallel sandbox execution (multiple tasks simultaneously)
 - [ ] Pause/resume functionality for long-running tasks
-- [ ] Private repository support with SSH key management
-- [ ] Enhanced cost optimization and budget controls
-- [ ] Sandbox templates for common workflows
+- [ ] Enhanced cost reporting and analytics
+- [ ] Custom sandbox templates from project detection
 
 See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and complete version history.
 

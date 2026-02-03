@@ -40,7 +40,7 @@ E2B sandbox integration enables truly autonomous Claude Code execution in isolat
 │                                                         │
 │  Local Machine                                          │
 │  ─────────────                                          │
-│  1. parallel-cc sandbox-run --prompt "..."             │
+│  1. parallel-cc sandbox run --prompt "..."             │
 │  2. Create worktree via gtr                            │
 │  3. Register E2B session in SQLite                     │
 │                                                         │
@@ -145,7 +145,7 @@ parallel-cc doctor
 ```bash
 # Dry run (no execution, just test upload/download)
 cd ~/projects/test-repo
-parallel-cc sandbox-run --dry-run --repo . --prompt "Test connection"
+parallel-cc sandbox run --dry-run --repo . --prompt "Test connection"
 
 # Expected output:
 # ✓ Worktree created: parallel-e2b-test123
@@ -159,7 +159,7 @@ parallel-cc sandbox-run --dry-run --repo . --prompt "Test connection"
 
 ```bash
 # Simple task to verify everything works
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Create a simple hello.js file that logs 'Hello from E2B sandbox!'"
 
 # Monitor progress
@@ -184,12 +184,12 @@ claude
 git commit PLAN.md -m "plan: user authentication implementation"
 
 # 2. Execute autonomously
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Execute PLAN.md using TDD approach. Write tests first, then implement features."
 
 # 3. Monitor (optional)
 parallel-cc status --sandbox-only
-parallel-cc sandbox-logs --session-id <id>
+parallel-cc sandbox logs --session-id <id>
 
 # 4. Review results
 cd parallel-e2b-<session-id>
@@ -206,25 +206,25 @@ git push origin HEAD:feature/auth
 
 ```bash
 # Execute a specific plan file
-parallel-cc sandbox-run --repo . --prompt-file ./docs/IMPLEMENTATION.md
+parallel-cc sandbox run --repo . --prompt-file ./docs/IMPLEMENTATION.md
 
 # APM Integration (if using Autonomous Project Manager)
-parallel-cc sandbox-run --repo . --prompt-file .apm/Implementation_Plan.md
+parallel-cc sandbox run --repo . --prompt-file .apm/Implementation_Plan.md
 
 # Multi-phase execution
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt-file .apm/Implementation_Plan.md \
   --focus-phase 2  # Execute only Phase 2
 ```
 
 ## CLI Command Reference
 
-### `sandbox-run` - Execute Autonomous Task
+### `sandbox run` - Execute Autonomous Task
 
 Start a new autonomous execution in an E2B sandbox.
 
 ```bash
-parallel-cc sandbox-run [options]
+parallel-cc sandbox run [options]
 
 Options:
   --repo <path>              Repository path (default: current directory)
@@ -239,19 +239,19 @@ Options:
 
 Examples:
   # Simple prompt
-  parallel-cc sandbox-run --repo . --prompt "Add unit tests for auth module"
+  parallel-cc sandbox run --repo . --prompt "Add unit tests for auth module"
 
   # Execute plan file
-  parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+  parallel-cc sandbox run --repo . --prompt-file PLAN.md
 
   # Custom timeout (30 minutes)
-  parallel-cc sandbox-run --repo . --prompt "Quick refactor" --timeout 30
+  parallel-cc sandbox run --repo . --prompt "Quick refactor" --timeout 30
 
   # Dry run (test without execution)
-  parallel-cc sandbox-run --repo . --dry-run
+  parallel-cc sandbox run --repo . --dry-run
 
   # Save full log locally
-  parallel-cc sandbox-run --repo . \
+  parallel-cc sandbox run --repo . \
     --prompt-file PLAN.md \
     --local-log ./sandbox-execution.log
 ```
@@ -302,12 +302,12 @@ Session ID: local-def456
   Started:      2025-12-09 14:00:00 (45 minutes ago)
 ```
 
-### `sandbox-logs` - View Execution Logs
+### `sandbox logs` - View Execution Logs
 
 Stream real-time logs from a running sandbox or view historical logs.
 
 ```bash
-parallel-cc sandbox-logs --session-id <id> [options]
+parallel-cc sandbox logs --session-id <id> [options]
 
 Options:
   --session-id <id>          E2B session ID (required)
@@ -317,24 +317,24 @@ Options:
 
 Examples:
   # View all logs
-  parallel-cc sandbox-logs --session-id e2b-abc123
+  parallel-cc sandbox logs --session-id e2b-abc123
 
   # Stream real-time
-  parallel-cc sandbox-logs --session-id e2b-abc123 --follow
+  parallel-cc sandbox logs --session-id e2b-abc123 --follow
 
   # Last 100 lines
-  parallel-cc sandbox-logs --session-id e2b-abc123 --tail 100
+  parallel-cc sandbox logs --session-id e2b-abc123 --tail 100
 
   # Save to file
-  parallel-cc sandbox-logs --session-id e2b-abc123 --save ./execution.log
+  parallel-cc sandbox logs --session-id e2b-abc123 --save ./execution.log
 ```
 
-### `sandbox-download` - Download Results
+### `sandbox download` - Download Results
 
 Download files from a running or completed sandbox without terminating it.
 
 ```bash
-parallel-cc sandbox-download --session-id <id> [options]
+parallel-cc sandbox download --session-id <id> [options]
 
 Options:
   --session-id <id>          E2B session ID (required)
@@ -344,21 +344,21 @@ Options:
 
 Examples:
   # Download changed files
-  parallel-cc sandbox-download --session-id e2b-abc123
+  parallel-cc sandbox download --session-id e2b-abc123
 
   # Custom output directory
-  parallel-cc sandbox-download --session-id e2b-abc123 --output ./my-results
+  parallel-cc sandbox download --session-id e2b-abc123 --output ./my-results
 
   # Download everything
-  parallel-cc sandbox-download --session-id e2b-abc123 --all
+  parallel-cc sandbox download --session-id e2b-abc123 --all
 ```
 
-### `sandbox-kill` - Terminate Sandbox
+### `sandbox kill` - Terminate Sandbox
 
 Immediately terminate a running sandbox and download results.
 
 ```bash
-parallel-cc sandbox-kill --session-id <id> [options]
+parallel-cc sandbox kill --session-id <id> [options]
 
 Options:
   --session-id <id>          E2B session ID (required)
@@ -367,21 +367,21 @@ Options:
 
 Examples:
   # Terminate and download
-  parallel-cc sandbox-kill --session-id e2b-abc123
+  parallel-cc sandbox kill --session-id e2b-abc123
 
   # Terminate but keep worktree for inspection
-  parallel-cc sandbox-kill --session-id e2b-abc123 --keep-worktree
+  parallel-cc sandbox kill --session-id e2b-abc123 --keep-worktree
 
   # Emergency kill (no download)
-  parallel-cc sandbox-kill --session-id e2b-abc123 --no-download
+  parallel-cc sandbox kill --session-id e2b-abc123 --no-download
 ```
 
-### `sandbox-health` - Check Sandbox Health
+### `sandbox health` - Check Sandbox Health
 
 Check if a sandbox is still responsive and get health metrics.
 
 ```bash
-parallel-cc sandbox-health --session-id <id>
+parallel-cc sandbox health --session-id <id>
 
 Output:
   Status:        RUNNING
@@ -414,12 +414,12 @@ git add PLAN.md
 git commit -m "plan: OAuth2 authentication implementation"
 
 # Step 2: Execute autonomously
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Execute PLAN.md step by step using TDD approach. Write comprehensive tests for each phase before implementation."
 
 # Step 3: Monitor progress (optional)
 parallel-cc status --sandbox-only
-parallel-cc sandbox-logs --session-id <id> --follow
+parallel-cc sandbox logs --session-id <id> --follow
 
 # Step 4: Review results
 cd parallel-e2b-<session-id>
@@ -438,7 +438,7 @@ gh pr create --title "Add OAuth2 Authentication" --body "Implements PLAN.md"
 
 ```bash
 # Step 1: Define the feature requirements
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Implement user profile management with the following TDD workflow:
 
   Phase 1: Write integration tests for profile CRUD operations
@@ -451,7 +451,7 @@ parallel-cc sandbox-run --repo . \
   Follow strict TDD: write tests first, run tests (expect failures), implement features, verify tests pass."
 
 # Step 2: Monitor test execution
-parallel-cc sandbox-logs --session-id <id> --follow | grep -E "(PASS|FAIL|✓|✗)"
+parallel-cc sandbox logs --session-id <id> --follow | grep -E "(PASS|FAIL|✓|✗)"
 
 # Step 3: Review test coverage
 cd parallel-e2b-<session-id>
@@ -469,7 +469,7 @@ git add .
 git commit -m "pre-refactor: stable baseline"
 
 # Step 2: Execute refactoring in sandbox
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Refactor the authentication module to use dependency injection:
 
   1. Run all tests to establish baseline
@@ -493,7 +493,7 @@ cat REFACTOR_NOTES.md  # Check for any issues
 **Use Case:** Generate comprehensive documentation
 
 ```bash
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Generate comprehensive documentation:
 
   1. Analyze all source files in src/
@@ -513,12 +513,12 @@ parallel-cc sandbox-run --repo . \
 ```bash
 # Terminal 1: Backend implementation
 cd ~/projects/backend
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt-file API_CHANGES.md
 
 # Terminal 2: Frontend implementation (after backend changes)
 cd ~/projects/frontend
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Update frontend to use new API endpoints defined in ../backend/API_CHANGES.md"
 
 # Both execute in parallel, isolated in separate sandboxes
@@ -546,17 +546,17 @@ parallel-cc status --sandbox-only
 
 ```bash
 # For quick tasks (10-15 minutes expected)
-parallel-cc sandbox-run --repo . --timeout 20 --prompt "Quick bugfix"
+parallel-cc sandbox run --repo . --timeout 20 --prompt "Quick bugfix"
 
 # For complex tasks (45-60 minutes expected)
-parallel-cc sandbox-run --repo . --timeout 60 --prompt-file PLAN.md
+parallel-cc sandbox run --repo . --timeout 60 --prompt-file PLAN.md
 ```
 
 #### 2. Use Dry Runs for Testing
 
 ```bash
 # Test your workflow without execution costs
-parallel-cc sandbox-run --dry-run --repo .
+parallel-cc sandbox run --dry-run --repo .
 
 # Verify:
 # - File upload works correctly
@@ -571,17 +571,17 @@ parallel-cc sandbox-run --dry-run --repo .
 parallel-cc status --sandbox-only
 
 # Kill idle sandboxes
-parallel-cc sandbox-kill --session-id <id>
+parallel-cc sandbox kill --session-id <id>
 ```
 
 #### 4. Download Partial Results
 
 ```bash
 # For long-running tasks, download intermediate results
-parallel-cc sandbox-download --session-id <id> --output ./checkpoint-1
+parallel-cc sandbox download --session-id <id> --output ./checkpoint-1
 
 # Review progress, decide whether to continue or kill
-parallel-cc sandbox-logs --session-id <id> --tail 50
+parallel-cc sandbox logs --session-id <id> --tail 50
 ```
 
 #### 5. Use Local Development First
@@ -654,7 +654,7 @@ export STRIPE_SECRET_KEY="sk_test_..."
 **In Sandbox:**
 ```bash
 # Pass via prompt (only for non-sensitive demo data)
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Run tests using test database: postgresql://localhost/test_db"
 
 # For production: Use E2B environment variables (future feature)
@@ -674,7 +674,7 @@ grep -i "password\|secret\|key" PLAN.md
 
 ```bash
 # Dry run shows exactly what will be uploaded
-parallel-cc sandbox-run --dry-run --repo .
+parallel-cc sandbox run --dry-run --repo .
 
 # Expected output:
 # Files to upload (45 files, 1.2 MB):
@@ -760,7 +760,7 @@ git diff main --name-only | xargs grep -i "password\|secret\|token"
 1. **Immediate Actions:**
    ```bash
    # Kill the sandbox immediately
-   parallel-cc sandbox-kill --session-id <id> --no-download
+   parallel-cc sandbox kill --session-id <id> --no-download
 
    # Rotate compromised credentials NOW
    # - Change passwords
@@ -771,7 +771,7 @@ git diff main --name-only | xargs grep -i "password\|secret\|token"
 2. **Review Impact:**
    ```bash
    # Check sandbox logs for any usage
-   parallel-cc sandbox-logs --session-id <id> --save incident.log
+   parallel-cc sandbox logs --session-id <id> --save incident.log
 
    # Review what was uploaded
    cd parallel-e2b-<session-id>
@@ -873,7 +873,7 @@ test-data/large-files/
 EOF
 
 # 4. Try again
-parallel-cc sandbox-run --repo . --prompt "..."
+parallel-cc sandbox run --repo . --prompt "..."
 ```
 
 #### Issue: "Sandbox terminated unexpectedly"
@@ -881,13 +881,13 @@ parallel-cc sandbox-run --repo . --prompt "..."
 **Symptoms:**
 ```
 Warning: Sandbox terminated unexpectedly (status: FAILED)
-Check logs for details: parallel-cc sandbox-logs --session-id <id>
+Check logs for details: parallel-cc sandbox logs --session-id <id>
 ```
 
 **Solutions:**
 ```bash
 # 1. Check logs for errors
-parallel-cc sandbox-logs --session-id <id> | tail -100
+parallel-cc sandbox logs --session-id <id> | tail -100
 
 # 2. Common causes:
 # - Out of memory (reduce concurrent processes in prompt)
@@ -899,7 +899,7 @@ cd parallel-e2b-<session-id>
 cat .claude-error.log  # If exists
 
 # 4. Retry with simpler task
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "Run tests only" \
   --timeout 10
 ```
@@ -926,7 +926,7 @@ curl https://api.anthropic.com/v1/messages \
 export ANTHROPIC_API_KEY="sk-ant-your-key"
 
 # 4. Retry sandbox execution
-parallel-cc sandbox-run --repo . --prompt "..."
+parallel-cc sandbox run --repo . --prompt "..."
 ```
 
 #### Issue: "Claude update failed"
@@ -958,7 +958,7 @@ The `claude update` command may return non-zero exit codes even in non-error con
 
 ```bash
 # Skip update if experiencing issues
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "..." \
   --skip-claude-update
 
@@ -981,11 +981,11 @@ No warnings at 30-minute or 50-minute marks
 **Solution:**
 ```bash
 # Check logs (warnings go to stdout)
-parallel-cc sandbox-logs --session-id <id> --follow
+parallel-cc sandbox logs --session-id <id> --follow
 
 # Warnings are logged but may be missed if not actively monitoring
 # Use --local-log to save all output
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "..." \
   --local-log ./execution.log
 
@@ -1010,7 +1010,7 @@ echo "*.log" >> .e2bignore
 
 # 3. Use compression (already enabled by default)
 # Verify in dry run output:
-parallel-cc sandbox-run --dry-run --repo .
+parallel-cc sandbox run --dry-run --repo .
 # Should show: "Compressed: 1.2 MB (from 5.4 MB)"
 
 # 4. Check network speed
@@ -1024,11 +1024,11 @@ speedtest-cli
 **Solutions:**
 ```bash
 # 1. Use selective download (default)
-parallel-cc sandbox-download --session-id <id> --selective
+parallel-cc sandbox download --session-id <id> --selective
 
 # 2. Only download specific files
 cd parallel-e2b-<session-id>
-parallel-cc sandbox-download --session-id <id> \
+parallel-cc sandbox download --session-id <id> \
   --filter "src/**/*.js,tests/**/*.js"
 
 # 3. Skip large build artifacts
@@ -1045,7 +1045,7 @@ echo "build/" >> .e2bignore
 export PARALLEL_CC_LOG_LEVEL=debug
 
 # Run command with verbose output
-parallel-cc sandbox-run --repo . --prompt "..."
+parallel-cc sandbox run --repo . --prompt "..."
 
 # Expected output includes:
 # [DEBUG] Creating worktree: parallel-e2b-abc123
@@ -1061,7 +1061,7 @@ parallel-cc sandbox-run --repo . --prompt "..."
 
 ```bash
 # Get detailed sandbox information
-parallel-cc sandbox-health --session-id <id>
+parallel-cc sandbox health --session-id <id>
 
 # Output includes:
 # - Status (RUNNING/COMPLETED/FAILED)
@@ -1089,7 +1089,7 @@ sqlite3 ~/.parallel-cc/coordinator.db \
 
 ```bash
 # Future feature: Custom E2B sandbox configuration
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "..." \
   --sandbox-config ./e2b-config.json
 
@@ -1110,18 +1110,18 @@ parallel-cc sandbox-run --repo . \
 
 ```bash
 # Future feature: Checkpoint long-running tasks
-parallel-cc sandbox-checkpoint --session-id <id>
+parallel-cc sandbox checkpoint --session-id <id>
 
 # Resume from checkpoint
-parallel-cc sandbox-resume --checkpoint-id <checkpoint-id>
+parallel-cc sandbox resume --checkpoint-id <checkpoint-id>
 ```
 
 ### Parallel Sandbox Execution
 
 ```bash
 # Future feature: Run multiple sandboxes in parallel
-parallel-cc sandbox-run --repo ./backend --prompt "Backend tests" &
-parallel-cc sandbox-run --repo ./frontend --prompt "Frontend tests" &
+parallel-cc sandbox run --repo ./backend --prompt "Backend tests" &
+parallel-cc sandbox run --repo ./frontend --prompt "Frontend tests" &
 
 # Monitor all
 parallel-cc status --sandbox-only
@@ -1131,7 +1131,7 @@ parallel-cc status --sandbox-only
 
 ```bash
 # Future feature: Inject GitHub PAT for private dependencies
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "..." \
   --github-token "$GITHUB_PAT"
 
@@ -1142,7 +1142,7 @@ parallel-cc sandbox-run --repo . \
 
 ```bash
 # Future feature: Deep integration with Autonomous Project Manager
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --apm-plan .apm/Implementation_Plan.md \
   --apm-phase 2 \
   --apm-resume  # Resume from last completed phase
@@ -1152,7 +1152,7 @@ parallel-cc sandbox-run --repo . \
 
 ```bash
 # Future feature: Run commands after successful execution
-parallel-cc sandbox-run --repo . \
+parallel-cc sandbox run --repo . \
   --prompt "..." \
   --on-success "npm test && npm run build" \
   --on-failure "git reset --hard HEAD"
@@ -1170,6 +1170,8 @@ parallel-cc sandbox-run --repo . \
 
 ---
 
-**Version:** 1.0.0
-**Last Updated:** 2025-12-09
-**Minimum parallel-cc Version:** v1.0.0
+**Version:** 2.0.0
+**Last Updated:** 2026-02-03
+**Minimum parallel-cc Version:** v2.0.0
+
+> **Note (v2.0):** CLI commands now use subcommand structure (e.g., `sandbox run` instead of `sandbox-run`). Old hyphenated commands still work but show deprecation warnings.
