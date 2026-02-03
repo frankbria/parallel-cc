@@ -4,7 +4,7 @@
 
 `parallel-cc` is a coordinator for running multiple Claude Code sessions in parallel on the same repository. It uses git worktrees to isolate each session's work.
 
-**Current Version:** 1.0.0
+**Current Version:** 2.0.0
 
 ## Architecture
 
@@ -31,7 +31,7 @@
 │                                                              │
 │  MCP Server (v0.5)                                          │
 │  ─────────────────                                          │
-│  parallel-cc mcp-serve (stdio transport)                    │
+│  parallel-cc mcp serve (stdio transport)                    │
 │       │                                                      │
 │       ├──► Session Management (v0.3-v0.4)                   │
 │       │   ├──► get_parallel_status - query active sessions  │
@@ -71,7 +71,7 @@
 │                                                              │
 │  Merge Detection Daemon (v0.4)                              │
 │  ─────────────────────────────                              │
-│  parallel-cc watch-merges                                   │
+│  parallel-cc watch merges                                   │
 │       │                                                      │
 │       ├──► Polls git for merged branches                    │
 │       ├──► Records merge events in SQLite                   │
@@ -98,6 +98,7 @@
 ```
 src/
 ├── cli.ts              # Commander-based CLI entry point
+├── cli-deprecation.ts  # Deprecation warning helpers (v2.0)
 ├── coordinator.ts      # Core logic - session management
 ├── db.ts               # SQLite operations via better-sqlite3
 ├── db-validators.ts    # Database input validation (v0.5)
@@ -137,6 +138,7 @@ scripts/
 └── uninstall.sh        # Removal script
 
 tests/
+├── cli-subcommands.test.ts         # CLI subcommand structure tests (v2.0)
 ├── db.test.ts                      # SessionDB tests
 ├── coordinator.test.ts             # Coordinator tests
 ├── gtr.test.ts                     # GtrWrapper tests
@@ -265,7 +267,7 @@ node dist/cli.js install --hooks --local --repo /tmp/test-repo
 
 # Test MCP installation (v0.3)
 node dist/cli.js install --mcp
-node dist/cli.js mcp-serve  # Start MCP server (stdio)
+node dist/cli.js mcp serve  # Start MCP server (stdio)
 
 # Test wrapper script
 ./scripts/claude-parallel.sh --help
@@ -352,6 +354,8 @@ CREATE INDEX idx_budget_period ON budget_tracking(period, period_start);
 
 ## CLI Commands
 
+**Note (v2.0.0):** Commands now use subcommand structure (e.g., `mcp serve` instead of `mcp-serve`). Old hyphenated commands still work but show deprecation warnings and will be removed in v3.0.0.
+
 | Command | Description |
 |---------|-------------|
 | `register --repo <path> --pid <n>` | Register a session, create worktree if needed |
@@ -360,12 +364,12 @@ CREATE INDEX idx_budget_period ON budget_tracking(period, period_start);
 | `status [--repo <path>]` | Show active sessions |
 | `cleanup` | Remove stale sessions and worktrees |
 | `doctor` | Check system health |
-| `mcp-serve` | Start MCP server (stdio transport) |
+| `mcp serve` | Start MCP server (stdio transport) |
 | `update` | Update database schema to latest version (v1.1.0) - runs all necessary migrations |
-| `watch-merges` | Start merge detection daemon (v0.4) |
-| `watch-merges --once` | Run single merge detection poll (v0.4) |
-| `merge-status` | Show merge events history (v0.4) |
-| `merge-status --subscriptions` | Show active merge subscriptions (v0.4) |
+| `watch merges` | Start merge detection daemon (v0.4) |
+| `watch merges --once` | Run single merge detection poll (v0.4) |
+| `merge status` | Show merge events history (v0.4) |
+| `merge status --subscriptions` | Show active merge subscriptions (v0.4) |
 | `install --all` | Install hooks globally + alias + MCP + update database |
 | `install --interactive` | Prompted installation for all options |
 | `install --hooks` | Install heartbeat hooks (interactive) |
@@ -375,6 +379,12 @@ CREATE INDEX idx_budget_period ON budget_tracking(period, period_start);
 | `install --mcp` | Configure MCP server in Claude settings |
 | `install --uninstall` | Remove installed hooks/alias/MCP |
 | `install --status` | Check installation status |
+| `sandbox run` | Execute autonomous task in E2B sandbox (v1.0) |
+| `sandbox logs` | View sandbox execution logs (v1.0) |
+| `sandbox download` | Download sandbox results (v1.0) |
+| `sandbox kill` | Terminate sandbox (v1.0) |
+| `sandbox list` | List all sandbox sessions (v1.0) |
+| `sandbox status` | Check sandbox health (v1.0) |
 | `templates list` | List all available sandbox templates (v1.1) |
 | `templates show <name>` | Show detailed template information (v1.1) |
 | `templates create <name>` | Create a new custom template (v1.1) |
@@ -385,7 +395,6 @@ CREATE INDEX idx_budget_period ON budget_tracking(period, period_start);
 | `config get <key>` | Get a configuration value (v1.1) |
 | `config list` | Display all configuration values (v1.1) |
 | `budget status` | Show budget and spending status (v1.1) |
-| `budget-status` | Alias for `budget status` (backward compat) |
 
 ## MCP Server Tools (v0.4)
 
@@ -465,7 +474,8 @@ Get history of detected merge events for a repository.
 | v0.4 | ✅ Complete | Branch merge detection, rebase assistance, conflict checking |
 | v0.5 | ✅ Complete | File claims, AST conflict detection, AI auto-fix, 441 tests (100%) |
 | v1.0 | ✅ Complete | E2B sandbox integration for autonomous execution |
-| v1.1 | ✅ Current | Sandbox templates for Node.js, Python, Next.js; project type detection |
+| v1.1 | ✅ Complete | Sandbox templates for Node.js, Python, Next.js; project type detection |
+| v2.0 | ✅ Current | CLI modernization: subcommand structure (mcp serve, sandbox run, etc.) with backward-compatible deprecation |
 
 ## E2B Sandbox Integration (v1.0)
 
@@ -527,46 +537,46 @@ E2B integration enables autonomous Claude Code execution in isolated cloud sandb
 
 ```bash
 # Basic execution (results downloaded as uncommitted changes)
-parallel-cc sandbox-run --repo . --prompt "Implement feature X"
-parallel-cc sandbox-run --repo . --prompt-file PLAN.md
+parallel-cc sandbox run --repo . --prompt "Implement feature X"
+parallel-cc sandbox run --repo . --prompt-file PLAN.md
 
 # Authentication methods
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method api-key  # Default
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --auth-method oauth    # Use subscription
+parallel-cc sandbox run --repo . --prompt "Fix bug" --auth-method api-key  # Default
+parallel-cc sandbox run --repo . --prompt "Fix bug" --auth-method oauth    # Use subscription
 
 # Branch management
-parallel-cc sandbox-run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
-parallel-cc sandbox-run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch + commit
-parallel-cc sandbox-run --repo . --prompt "Refactor"                                # Default: uncommitted changes
+parallel-cc sandbox run --repo . --prompt "Add feature" --branch auto               # Auto-generate branch + commit
+parallel-cc sandbox run --repo . --prompt "Fix issue #42" --branch feature/issue-42 # Specify branch + commit
+parallel-cc sandbox run --repo . --prompt "Refactor"                                # Default: uncommitted changes
 
 # Combined example
-parallel-cc sandbox-run \
+parallel-cc sandbox run \
   --repo . \
   --prompt "Implement auth system" \
   --auth-method oauth \
   --branch auto
 
 # Override git identity for commits
-parallel-cc sandbox-run --repo . --prompt "Fix bug" \
+parallel-cc sandbox run --repo . --prompt "Fix bug" \
   --git-user "CI Bot" --git-email "ci@example.com"
 
 # Monitor active sandboxes
 parallel-cc status --sandbox-only
-parallel-cc sandbox-logs --session-id <id> --follow
+parallel-cc sandbox logs --session-id <id> --follow
 
 # Download results without terminating
-parallel-cc sandbox-download --session-id <id>
+parallel-cc sandbox download --session-id <id>
 
 # Kill running sandbox
-parallel-cc sandbox-kill --session-id <id>
+parallel-cc sandbox kill --session-id <id>
 
 # Test setup without execution
-parallel-cc sandbox-run --dry-run --repo .
+parallel-cc sandbox run --dry-run --repo .
 
 # Use managed templates (v1.1)
-parallel-cc sandbox-run --repo . --prompt "Build feature" --use-template node-20-typescript
-parallel-cc sandbox-run --repo . --prompt "Develop API" --use-template python-3.12-fastapi
-parallel-cc sandbox-run --repo . --prompt "Create page" --use-template full-stack-nextjs
+parallel-cc sandbox run --repo . --prompt "Build feature" --use-template node-20-typescript
+parallel-cc sandbox run --repo . --prompt "Develop API" --use-template python-3.12-fastapi
+parallel-cc sandbox run --repo . --prompt "Create page" --use-template full-stack-nextjs
 ```
 
 ### Sandbox Templates (v1.1)
@@ -613,7 +623,7 @@ E2B sandboxes support two authentication methods for Claude CLI:
 export ANTHROPIC_API_KEY="sk-ant-api03-..."
 
 # Run with API key auth (default)
-parallel-cc sandbox-run --repo . --prompt "Task" --auth-method api-key
+parallel-cc sandbox run --repo . --prompt "Task" --auth-method api-key
 ```
 
 **2. OAuth Authentication**
@@ -630,7 +640,7 @@ claude
 /login
 
 # Exit Claude Code (Ctrl-D), then run with OAuth auth
-parallel-cc sandbox-run --repo . --prompt "Task" --auth-method oauth
+parallel-cc sandbox run --repo . --prompt "Task" --auth-method oauth
 ```
 
 **Authentication Method Selection:**
@@ -657,17 +667,17 @@ Commits made in E2B sandboxes use a configurable git identity. The system uses a
 **Usage:**
 ```bash
 # Default: auto-detect from local git config
-parallel-cc sandbox-run --repo . --prompt "Fix bug"
+parallel-cc sandbox run --repo . --prompt "Fix bug"
 
 # Override with CLI flags
-parallel-cc sandbox-run --repo . --prompt "Fix bug" \
+parallel-cc sandbox run --repo . --prompt "Fix bug" \
   --git-user "CI Bot" \
   --git-email "ci@example.com"
 
 # Set via environment variables
 export PARALLEL_CC_GIT_USER="Deploy Bot"
 export PARALLEL_CC_GIT_EMAIL="deploy@example.com"
-parallel-cc sandbox-run --repo . --prompt "Deploy feature"
+parallel-cc sandbox run --repo . --prompt "Deploy feature"
 ```
 
 **Notes:**
@@ -682,7 +692,7 @@ Control how E2B results are applied to your local worktree:
 
 **Default (No `--branch` flag): Uncommitted Changes**
 ```bash
-parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --auth-method oauth
+parallel-cc sandbox run --repo . --prompt "Fix issue #84" --auth-method oauth
 # Results downloaded as uncommitted tracked files
 # You review, create branch, and commit manually
 ```
@@ -703,7 +713,7 @@ git push origin fix/84  # Push when ready
 
 **Auto-Generate Branch (`--branch auto`): Convenience**
 ```bash
-parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch auto
+parallel-cc sandbox run --repo . --prompt "Fix issue #84" --branch auto
 # Creates branch: e2b/fix-issue-84-2025-12-13-23-45
 # Commits with: "E2B execution: Fix issue #84..."
 ```
@@ -721,7 +731,7 @@ git push origin e2b/fix-issue-84-2025-12-13-23-45  # Push the branch
 
 **Specify Branch Name (`--branch <name>`): Custom Naming**
 ```bash
-parallel-cc sandbox-run --repo . --prompt "Fix issue #84" --branch feature/issue-84
+parallel-cc sandbox run --repo . --prompt "Fix issue #84" --branch feature/issue-84
 # Creates branch: feature/issue-84
 # Commits with: "E2B execution: Fix issue #84..."
 ```
@@ -757,16 +767,16 @@ Git Live Mode (`--git-live`) pushes results directly to a remote feature branch 
 
 ```bash
 # Basic git-live: Push and create PR automatically
-parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-live
+parallel-cc sandbox run --repo . --prompt "Fix bug" --git-live
 
 # With custom target branch (default: main)
-parallel-cc sandbox-run --repo . --prompt "Add feature" --git-live --target-branch develop
+parallel-cc sandbox run --repo . --prompt "Add feature" --git-live --target-branch develop
 
 # With custom branch name
-parallel-cc sandbox-run --repo . --prompt "Fix #42" --git-live --branch feature/issue-42
+parallel-cc sandbox run --repo . --prompt "Fix #42" --git-live --branch feature/issue-42
 
 # Full example
-parallel-cc sandbox-run \
+parallel-cc sandbox run \
   --repo . \
   --prompt "Implement auth system" \
   --auth-method oauth \
@@ -832,15 +842,15 @@ SSH key injection enables access to private Git repositories within E2B sandboxe
 **Usage:**
 ```bash
 # Basic SSH key injection
-parallel-cc sandbox-run --repo . --prompt "Clone private repo" \
+parallel-cc sandbox run --repo . --prompt "Clone private repo" \
   --ssh-key ~/.ssh/id_ed25519
 
 # Non-interactive (CI/CD) - requires explicit confirmation flag
-parallel-cc sandbox-run --repo . --prompt "Build private deps" \
+parallel-cc sandbox run --repo . --prompt "Build private deps" \
   --ssh-key ~/.ssh/deploy_key --confirm-ssh-key --json
 
 # With OAuth and git-live
-parallel-cc sandbox-run --repo . --prompt "Update dependencies" \
+parallel-cc sandbox run --repo . --prompt "Update dependencies" \
   --ssh-key ~/.ssh/id_ed25519 --auth-method oauth --git-live
 ```
 

@@ -1,6 +1,6 @@
 {
   "name": "parallel-cc",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Coordinate parallel Claude Code sessions using git worktrees and E2B cloud sandboxes for autonomous execution",
   "type": "module",
   "bin": {

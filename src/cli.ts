@@ -43,11 +43,12 @@ import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
 import { SandboxStatus, type BudgetConfig, type E2BSession, type StatusResult, type SessionInfo } from './types.js';
+import { showDeprecationWarning, DEPRECATED_COMMANDS } from './cli-deprecation.js';
 
 program
   .name('parallel-cc')
   .description('Coordinate parallel Claude Code sessions using git worktrees')
-  .version('0.5.0');
+  .version('2.0.0');
 
 /**
  * Helper to prompt user for input (for interactive mode)
@@ -812,11 +813,19 @@ program
     console.log('');
   });
 
+// ============================================================================
+// MCP Commands (v2.0)
+// ============================================================================
+
+const mcpCmd = program
+  .command('mcp')
+  .description('MCP server operations');
+
 /**
  * MCP Server - expose tools for Claude Code to query session status
  */
-program
-  .command('mcp-serve')
+mcpCmd
+  .command('serve')
   .description('Start MCP server for Claude Code integration - exposes v0.5 tools for file claims, conflict detection, and auto-fix (stdio transport)')
   .action(async () => {
     try {
@@ -829,192 +838,263 @@ program
   });
 
 /**
- * Watch for merged branches (v0.4)
- * Starts a background daemon that polls for merged branches and sends notifications
+ * DEPRECATED: Use 'mcp serve' instead
  */
 program
-  .command('watch-merges')
-  .description('Start merge detection daemon to monitor for merged branches (v0.4)')
-  .option('--interval <seconds>', 'Poll interval in seconds', '60')
-  .option('--once', 'Run a single poll iteration and exit')
-  .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    const db = new SessionDB();
-    const pollInterval = parseInt(options.interval, 10);
-
-    if (isNaN(pollInterval) || pollInterval < 5) {
-      console.error(chalk.red('Poll interval must be at least 5 seconds'));
-      process.exit(1);
-    }
-
-    const detector = new MergeDetector(db, {
-      pollIntervalSeconds: pollInterval
-    });
-
+  .command('mcp-serve')
+  .description('[DEPRECATED] Use "mcp serve" instead')
+  .action(async () => {
+    showDeprecationWarning('mcp-serve', 'mcp serve');
     try {
-      if (options.once) {
-        // Single poll run
-        if (!options.json) {
-          console.log(chalk.bold('\nRunning single merge detection poll...\n'));
-        }
-
-        const result = await detector.pollForMerges();
-
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(`Subscriptions checked: ${result.subscriptionsChecked}`);
-          console.log(`New merges detected: ${result.newMerges.length}`);
-          console.log(`Notifications sent: ${result.notificationsSent}`);
-
-          if (result.newMerges.length > 0) {
-            console.log(chalk.bold('\nNew Merges:'));
-            for (const merge of result.newMerges) {
-              console.log(`  ${chalk.green('●')} ${merge.branch_name} → ${merge.target_branch}`);
-              console.log(chalk.dim(`    Repo: ${merge.repo_path}`));
-              console.log(chalk.dim(`    Detected: ${merge.detected_at}`));
-            }
-          }
-
-          if (result.errors.length > 0) {
-            console.log(chalk.bold('\nErrors:'));
-            for (const err of result.errors) {
-              console.log(chalk.red(`  ✗ ${err}`));
-            }
-          }
-          console.log('');
-        }
-      } else {
-        // Continuous polling daemon
-        console.log(chalk.bold('\nStarting merge detection daemon...\n'));
-        console.log(chalk.dim(`  Poll interval: ${pollInterval} seconds`));
-        console.log(chalk.dim('  Press Ctrl+C to stop\n'));
-
-        // Handle graceful shutdown
-        process.on('SIGINT', () => {
-          console.log(chalk.yellow('\nStopping merge detection daemon...'));
-          detector.stopPolling();
-          db.close();
-          process.exit(0);
-        });
-
-        process.on('SIGTERM', () => {
-          detector.stopPolling();
-          db.close();
-          process.exit(0);
-        });
-
-        detector.startPolling();
-
-        // Keep process alive
-        await new Promise(() => {}); // Never resolves, runs until signal
-      }
+      await startMcpServer();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Merge detection failed: ${errorMessage}`));
-      }
-      db.close();
+      console.error(`MCP server failed: ${errorMessage}`);
       process.exit(1);
     }
   });
 
+// ============================================================================
+// Watch Commands (v2.0)
+// ============================================================================
+
 /**
- * Show merge events (v0.4)
- * Display history of detected merge events
+ * Shared handler for watch-merges functionality
+ */
+async function handleWatchMerges(options: { interval: string; once?: boolean; json?: boolean }) {
+  const db = new SessionDB();
+  const pollInterval = parseInt(options.interval, 10);
+
+  if (isNaN(pollInterval) || pollInterval < 5) {
+    console.error(chalk.red('Poll interval must be at least 5 seconds'));
+    process.exit(1);
+  }
+
+  const detector = new MergeDetector(db, {
+    pollIntervalSeconds: pollInterval
+  });
+
+  try {
+    if (options.once) {
+      // Single poll run
+      if (!options.json) {
+        console.log(chalk.bold('\nRunning single merge detection poll...\n'));
+      }
+
+      const result = await detector.pollForMerges();
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`Subscriptions checked: ${result.subscriptionsChecked}`);
+        console.log(`New merges detected: ${result.newMerges.length}`);
+        console.log(`Notifications sent: ${result.notificationsSent}`);
+
+        if (result.newMerges.length > 0) {
+          console.log(chalk.bold('\nNew Merges:'));
+          for (const merge of result.newMerges) {
+            console.log(`  ${chalk.green('●')} ${merge.branch_name} → ${merge.target_branch}`);
+            console.log(chalk.dim(`    Repo: ${merge.repo_path}`));
+            console.log(chalk.dim(`    Detected: ${merge.detected_at}`));
+          }
+        }
+
+        if (result.errors.length > 0) {
+          console.log(chalk.bold('\nErrors:'));
+          for (const err of result.errors) {
+            console.log(chalk.red(`  ✗ ${err}`));
+          }
+        }
+        console.log('');
+      }
+    } else {
+      // Continuous polling daemon
+      console.log(chalk.bold('\nStarting merge detection daemon...\n'));
+      console.log(chalk.dim(`  Poll interval: ${pollInterval} seconds`));
+      console.log(chalk.dim('  Press Ctrl+C to stop\n'));
+
+      // Handle graceful shutdown
+      process.on('SIGINT', () => {
+        console.log(chalk.yellow('\nStopping merge detection daemon...'));
+        detector.stopPolling();
+        db.close();
+        process.exit(0);
+      });
+
+      process.on('SIGTERM', () => {
+        detector.stopPolling();
+        db.close();
+        process.exit(0);
+      });
+
+      detector.startPolling();
+
+      // Keep process alive
+      await new Promise(() => {}); // Never resolves, runs until signal
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Merge detection failed: ${errorMessage}`));
+    }
+    db.close();
+    process.exit(1);
+  }
+}
+
+const watchCmd = program
+  .command('watch')
+  .description('Watch and monitoring operations');
+
+/**
+ * Watch for merged branches (v0.4)
+ */
+watchCmd
+  .command('merges')
+  .description('Start merge detection daemon to monitor for merged branches (v0.4)')
+  .option('--interval <seconds>', 'Poll interval in seconds', '60')
+  .option('--once', 'Run a single poll iteration and exit')
+  .option('--json', 'Output as JSON')
+  .action(handleWatchMerges);
+
+/**
+ * DEPRECATED: Use 'watch merges' instead
  */
 program
-  .command('merge-status')
+  .command('watch-merges')
+  .description('[DEPRECATED] Use "watch merges" instead')
+  .option('--interval <seconds>', 'Poll interval in seconds', '60')
+  .option('--once', 'Run a single poll iteration and exit')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    showDeprecationWarning('watch-merges', 'watch merges');
+    await handleWatchMerges(options);
+  });
+
+// ============================================================================
+// Merge Commands (v2.0)
+// ============================================================================
+
+/**
+ * Shared handler for merge-status functionality
+ */
+function handleMergeStatus(options: { repo?: string; branch?: string; limit: string; subscriptions?: boolean; json?: boolean }) {
+  const db = new SessionDB();
+  try {
+    const limit = parseInt(options.limit, 10) || 20;
+
+    if (options.subscriptions) {
+      // Show subscriptions
+      const subscriptions = db.getActiveSubscriptions();
+      let filtered = subscriptions;
+
+      if (options.repo) {
+        filtered = filtered.filter(s => s.repo_path.includes(options.repo!));
+      }
+      if (options.branch) {
+        filtered = filtered.filter(s => s.branch_name.includes(options.branch!));
+      }
+
+      filtered = filtered.slice(0, limit);
+
+      if (options.json) {
+        console.log(JSON.stringify({ subscriptions: filtered, total: filtered.length }, null, 2));
+      } else {
+        console.log(chalk.bold(`\nActive Merge Subscriptions: ${filtered.length}`));
+
+        if (filtered.length === 0) {
+          console.log(chalk.dim('  No active subscriptions'));
+        } else {
+          for (const sub of filtered) {
+            console.log(`\n  ${chalk.blue('●')} ${sub.branch_name} → ${sub.target_branch}`);
+            console.log(chalk.dim(`    Session: ${sub.session_id}`));
+            console.log(chalk.dim(`    Repo: ${sub.repo_path}`));
+            console.log(chalk.dim(`    Created: ${sub.created_at}`));
+          }
+        }
+        console.log('');
+      }
+    } else {
+      // Show merge events
+      let events = options.repo
+        ? db.getMergeEventsByRepo(options.repo)
+        : db.getAllMergeEvents();
+
+      if (options.branch) {
+        events = events.filter(e => e.branch_name.includes(options.branch!));
+      }
+
+      events = events.slice(0, limit);
+
+      if (options.json) {
+        console.log(JSON.stringify({ events, total: events.length }, null, 2));
+      } else {
+        console.log(chalk.bold(`\nMerge Events: ${events.length}`));
+
+        if (events.length === 0) {
+          console.log(chalk.dim('  No merge events recorded'));
+          console.log(chalk.dim('  Run "parallel-cc watch merges" to start detecting merges'));
+        } else {
+          for (const event of events) {
+            const status = event.notification_sent
+              ? chalk.green('✓')
+              : chalk.yellow('○');
+            console.log(`\n  ${status} ${event.branch_name} → ${event.target_branch}`);
+            console.log(chalk.dim(`    Repo: ${event.repo_path}`));
+            console.log(chalk.dim(`    Merged: ${event.merged_at}`));
+            console.log(chalk.dim(`    Detected: ${event.detected_at}`));
+            console.log(chalk.dim(`    Source commit: ${event.source_commit.substring(0, 8)}`));
+          }
+        }
+        console.log('');
+      }
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Failed to get merge status: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    db.close();
+  }
+}
+
+const mergeCmd = program
+  .command('merge')
+  .description('Merge detection and status operations');
+
+/**
+ * Show merge events (v0.4)
+ */
+mergeCmd
+  .command('status')
   .description('Show merge events and subscription status (v0.4)')
   .option('--repo <path>', 'Filter by repository path')
   .option('--branch <name>', 'Filter by branch name')
   .option('--limit <n>', 'Limit number of results', '20')
   .option('--subscriptions', 'Show active subscriptions instead of merge events')
   .option('--json', 'Output as JSON')
+  .action(handleMergeStatus);
+
+/**
+ * DEPRECATED: Use 'merge status' instead
+ */
+program
+  .command('merge-status')
+  .description('[DEPRECATED] Use "merge status" instead')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--branch <name>', 'Filter by branch name')
+  .option('--limit <n>', 'Limit number of results', '20')
+  .option('--subscriptions', 'Show active subscriptions instead of merge events')
+  .option('--json', 'Output as JSON')
   .action((options) => {
-    const db = new SessionDB();
-    try {
-      const limit = parseInt(options.limit, 10) || 20;
-
-      if (options.subscriptions) {
-        // Show subscriptions
-        const subscriptions = db.getActiveSubscriptions();
-        let filtered = subscriptions;
-
-        if (options.repo) {
-          filtered = filtered.filter(s => s.repo_path.includes(options.repo));
-        }
-        if (options.branch) {
-          filtered = filtered.filter(s => s.branch_name.includes(options.branch));
-        }
-
-        filtered = filtered.slice(0, limit);
-
-        if (options.json) {
-          console.log(JSON.stringify({ subscriptions: filtered, total: filtered.length }, null, 2));
-        } else {
-          console.log(chalk.bold(`\nActive Merge Subscriptions: ${filtered.length}`));
-
-          if (filtered.length === 0) {
-            console.log(chalk.dim('  No active subscriptions'));
-          } else {
-            for (const sub of filtered) {
-              console.log(`\n  ${chalk.blue('●')} ${sub.branch_name} → ${sub.target_branch}`);
-              console.log(chalk.dim(`    Session: ${sub.session_id}`));
-              console.log(chalk.dim(`    Repo: ${sub.repo_path}`));
-              console.log(chalk.dim(`    Created: ${sub.created_at}`));
-            }
-          }
-          console.log('');
-        }
-      } else {
-        // Show merge events
-        let events = options.repo
-          ? db.getMergeEventsByRepo(options.repo)
-          : db.getAllMergeEvents();
-
-        if (options.branch) {
-          events = events.filter(e => e.branch_name.includes(options.branch));
-        }
-
-        events = events.slice(0, limit);
-
-        if (options.json) {
-          console.log(JSON.stringify({ events, total: events.length }, null, 2));
-        } else {
-          console.log(chalk.bold(`\nMerge Events: ${events.length}`));
-
-          if (events.length === 0) {
-            console.log(chalk.dim('  No merge events recorded'));
-            console.log(chalk.dim('  Run "parallel-cc watch-merges" to start detecting merges'));
-          } else {
-            for (const event of events) {
-              const status = event.notification_sent
-                ? chalk.green('✓')
-                : chalk.yellow('○');
-              console.log(`\n  ${status} ${event.branch_name} → ${event.target_branch}`);
-              console.log(chalk.dim(`    Repo: ${event.repo_path}`));
-              console.log(chalk.dim(`    Merged: ${event.merged_at}`));
-              console.log(chalk.dim(`    Detected: ${event.detected_at}`));
-              console.log(chalk.dim(`    Source commit: ${event.source_commit.substring(0, 8)}`));
-            }
-          }
-          console.log('');
-        }
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Failed to get merge status: ${errorMessage}`));
-      }
-      process.exit(1);
-    } finally {
-      db.close();
-    }
+    showDeprecationWarning('merge-status', 'merge status');
+    handleMergeStatus(options);
   });
 
 /**
@@ -1378,11 +1458,41 @@ program
 // E2B Sandbox Commands (v1.0)
 // ============================================================================
 
+// ============================================================================
+// Sandbox Commands (v2.0)
+// ============================================================================
+
+const sandboxCmd = program
+  .command('sandbox')
+  .description('E2B sandbox operations for autonomous task execution (v1.0)');
+
+// Type definition for sandbox-run options
+interface SandboxRunOptions {
+  repo: string;
+  prompt?: string;
+  promptFile?: string;
+  template?: string;
+  useTemplate?: string;
+  authMethod: string;
+  dryRun?: boolean;
+  branch?: string;
+  gitLive?: boolean;
+  targetBranch: string;
+  gitUser?: string;
+  gitEmail?: string;
+  sshKey?: string;
+  confirmSshKey?: boolean;
+  npmToken?: string;
+  npmRegistry: string;
+  budget?: string;
+  json?: boolean;
+}
+
 /**
  * Execute autonomous task in E2B sandbox
  */
-program
-  .command('sandbox-run')
+sandboxCmd
+  .command('run')
   .description(`Execute autonomous task in E2B sandbox with full worktree isolation (v1.0)
 
 Authentication:
@@ -1407,22 +1517,22 @@ NPM Authentication (for private packages):
 
 Examples:
   # Default: uncommitted changes, review before committing
-  parallel-cc sandbox-run --repo . --prompt "Fix bug"
+  parallel-cc sandbox run --repo . --prompt "Fix bug"
 
   # OAuth auth + auto branch
-  parallel-cc sandbox-run --repo . --prompt "Add feature" --auth-method oauth --branch auto
+  parallel-cc sandbox run --repo . --prompt "Add feature" --auth-method oauth --branch auto
 
   # Custom branch name
-  parallel-cc sandbox-run --repo . --prompt "Fix #42" --branch feature/issue-42
+  parallel-cc sandbox run --repo . --prompt "Fix #42" --branch feature/issue-42
 
   # Override git identity for commits
-  parallel-cc sandbox-run --repo . --prompt "Fix bug" --git-user "CI Bot" --git-email "ci@example.com"
+  parallel-cc sandbox run --repo . --prompt "Fix bug" --git-user "CI Bot" --git-email "ci@example.com"
 
   # Private NPM packages
-  parallel-cc sandbox-run --repo . --prompt "Install deps" --npm-token "npm_xxx"
+  parallel-cc sandbox run --repo . --prompt "Install deps" --npm-token "npm_xxx"
 
   # Custom NPM registry
-  parallel-cc sandbox-run --repo . --prompt "Task" --npm-token "xxx" --npm-registry "https://npm.company.com"`)
+  parallel-cc sandbox run --repo . --prompt "Task" --npm-token "xxx" --npm-registry "https://npm.company.com"`)
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
@@ -1441,7 +1551,12 @@ Examples:
   .option('--npm-registry <url>', 'Custom NPM registry URL (default: https://registry.npmjs.org)', 'https://registry.npmjs.org')
   .option('--budget <amount>', 'Per-session budget limit in USD (e.g., 0.50 for $0.50)')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
+  .action(handleSandboxRun);
+
+/**
+ * Shared handler for sandbox-run functionality
+ */
+async function handleSandboxRun(options: SandboxRunOptions) {
     const coordinator = new Coordinator();
     let sandboxId: string | null = null;
     let sandboxManager: SandboxManager | null = null;
@@ -1646,7 +1761,7 @@ Examples:
           process.exit(1);
         }
       } else {
-        prompt = options.prompt;
+        prompt = options.prompt!; // Validated earlier that either prompt or promptFile is provided
       }
 
       // Normalize repo path
@@ -1890,7 +2005,7 @@ Examples:
         if (!options.json) {
           console.log(chalk.yellow('\n✓ DRY RUN complete - skipping execution'));
           console.log(chalk.dim('  Sandbox will remain active for inspection'));
-          console.log(chalk.dim(`  Use: parallel-cc sandbox-kill --session-id ${sessionId}`));
+          console.log(chalk.dim(`  Use: parallel-cc sandbox kill --session-id ${sessionId}`));
         }
 
         if (options.json) {
@@ -2191,410 +2306,565 @@ Examples:
     } finally {
       coordinator.close();
     }
+}
+
+/**
+ * DEPRECATED: Use 'sandbox run' instead
+ */
+program
+  .command('sandbox-run')
+  .description('[DEPRECATED] Use "sandbox run" instead - Execute autonomous task in E2B sandbox')
+  .requiredOption('--repo <path>', 'Repository path')
+  .option('--prompt <text>', 'Prompt text to execute')
+  .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md)')
+  .option('--template <image>', 'E2B sandbox template')
+  .option('--use-template <name>', 'Use managed template from templates list')
+  .option('--auth-method <method>', 'Authentication method: api-key or oauth', 'api-key')
+  .option('--dry-run', 'Test upload without execution')
+  .option('--branch <name>', 'Create feature branch for changes')
+  .option('--git-live', 'Push results to remote and create PR')
+  .option('--target-branch <branch>', 'Target branch for PR', 'main')
+  .option('--git-user <name>', 'Git user name for commits')
+  .option('--git-email <email>', 'Git user email for commits')
+  .option('--ssh-key <path>', 'Path to SSH private key')
+  .option('--confirm-ssh-key', 'Skip SSH key security warning')
+  .option('--npm-token <token>', 'NPM authentication token')
+  .option('--npm-registry <url>', 'Custom NPM registry URL', 'https://registry.npmjs.org')
+  .option('--budget <amount>', 'Per-session budget limit in USD')
+  .option('--json', 'Output as JSON')
+  .action(async (options: SandboxRunOptions) => {
+    showDeprecationWarning('sandbox-run', 'sandbox run');
+    await handleSandboxRun(options);
   });
+
+// Type definition for sandbox-logs options
+interface SandboxLogsOptions {
+  sessionId: string;
+  follow?: boolean;
+  lines: string;
+  json?: boolean;
+}
+
+/**
+ * Shared handler for sandbox-logs functionality
+ */
+async function handleSandboxLogs(options: SandboxLogsOptions) {
+  const coordinator = new Coordinator();
+  try {
+    const db = coordinator['db'];
+    const sessionId = options.sessionId;
+
+    // Get E2B session by ID
+    const sessions = db.listE2BSessions();
+    const session = sessions.find(s => s.id === sessionId);
+
+    if (!session) {
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: 'Session not found' }));
+      } else {
+        console.error(chalk.red(`✗ Session not found: ${sessionId}`));
+      }
+      process.exit(1);
+    }
+
+    if (!options.json) {
+      console.log(chalk.bold(`\nSandbox Logs: ${sessionId}\n`));
+      console.log(chalk.dim(`Sandbox ID: ${session.sandbox_id}`));
+      console.log(chalk.dim(`Status: ${session.status}`));
+      console.log(chalk.dim(`Created: ${session.created_at}\n`));
+    }
+
+    // Get output log from database
+    const outputLog = session.output_log || '';
+
+    if (options.follow && session.status === SandboxStatus.RUNNING) {
+      if (!options.json) {
+        console.log(chalk.yellow('⚠ Follow mode not yet implemented for live sessions'));
+        console.log(chalk.dim('Showing buffered output:\n'));
+      }
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        success: true,
+        sessionId,
+        sandboxId: session.sandbox_id,
+        status: session.status,
+        output: outputLog,
+        lineCount: outputLog.split('\n').length
+      }, null, 2));
+    } else {
+      // Show last N lines
+      const lines = outputLog.split('\n');
+      const limitLines = parseInt(options.lines, 10) || 100;
+      const displayLines = lines.slice(-limitLines);
+
+      console.log(displayLines.join('\n'));
+      console.log(chalk.dim(`\n(Showing last ${displayLines.length} of ${lines.length} lines)`));
+    }
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Failed to get logs: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    coordinator.close();
+  }
+}
 
 /**
  * View sandbox session logs
  */
-program
-  .command('sandbox-logs')
+sandboxCmd
+  .command('logs')
   .description('View E2B sandbox execution logs (v1.0)')
   .requiredOption('--session-id <id>', 'Session ID')
   .option('--follow', 'Follow log output in real-time (like tail -f)')
   .option('--lines <n>', 'Number of lines to show', '100')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    const coordinator = new Coordinator();
+  .action(handleSandboxLogs);
+
+/**
+ * DEPRECATED: Use 'sandbox logs' instead
+ */
+program
+  .command('sandbox-logs')
+  .description('[DEPRECATED] Use "sandbox logs" instead')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .option('--follow', 'Follow log output in real-time (like tail -f)')
+  .option('--lines <n>', 'Number of lines to show', '100')
+  .option('--json', 'Output as JSON')
+  .action(async (options: SandboxLogsOptions) => {
+    showDeprecationWarning('sandbox-logs', 'sandbox logs');
+    await handleSandboxLogs(options);
+  });
+
+// Type definition for sandbox-download options
+interface SandboxDownloadOptions {
+  sessionId: string;
+  output: string;
+  json?: boolean;
+}
+
+/**
+ * Shared handler for sandbox-download functionality
+ */
+async function handleSandboxDownload(options: SandboxDownloadOptions) {
+  const coordinator = new Coordinator();
+  const sandboxManager = new SandboxManager(logger);
+
+  try {
+    // Validate E2B API key early
     try {
-      const db = coordinator['db'];
-      const sessionId = options.sessionId;
-
-      // Get E2B session by ID
-      const sessions = db.listE2BSessions();
-      const session = sessions.find(s => s.id === sessionId);
-
-      if (!session) {
-        if (options.json) {
-          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
-        } else {
-          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
-        }
-        process.exit(1);
-      }
-
-      if (!options.json) {
-        console.log(chalk.bold(`\nSandbox Logs: ${sessionId}\n`));
-        console.log(chalk.dim(`Sandbox ID: ${session.sandbox_id}`));
-        console.log(chalk.dim(`Status: ${session.status}`));
-        console.log(chalk.dim(`Created: ${session.created_at}\n`));
-      }
-
-      // Get output log from database
-      const outputLog = session.output_log || '';
-
-      if (options.follow && session.status === SandboxStatus.RUNNING) {
-        if (!options.json) {
-          console.log(chalk.yellow('⚠ Follow mode not yet implemented for live sessions'));
-          console.log(chalk.dim('Showing buffered output:\n'));
-        }
-      }
-
+      SandboxManager.validateApiKey();
+    } catch (error) {
       if (options.json) {
         console.log(JSON.stringify({
-          success: true,
-          sessionId,
-          sandboxId: session.sandbox_id,
-          status: session.status,
-          output: outputLog,
-          lineCount: outputLog.split('\n').length
-        }, null, 2));
+          success: false,
+          error: error instanceof Error ? error.message : 'E2B API key validation failed',
+          hint: 'Set E2B_API_KEY environment variable. Get your key from https://e2b.dev/dashboard'
+        }));
       } else {
-        // Show last N lines
-        const lines = outputLog.split('\n');
-        const limitLines = parseInt(options.lines, 10) || 100;
-        const displayLines = lines.slice(-limitLines);
-
-        console.log(displayLines.join('\n'));
-        console.log(chalk.dim(`\n(Showing last ${displayLines.length} of ${lines.length} lines)`));
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Failed to get logs: ${errorMessage}`));
+        console.error(chalk.red(`✗ ${error instanceof Error ? error.message : 'E2B API key validation failed'}`));
+        console.error(chalk.dim('  Get your E2B API key from: https://e2b.dev/dashboard'));
       }
       process.exit(1);
-    } finally {
-      coordinator.close();
     }
-  });
+
+    const db = coordinator['db'];
+    const sessionId = options.sessionId;
+
+    // Get E2B session
+    const sessions = db.listE2BSessions();
+    const session = sessions.find(s => s.id === sessionId);
+
+    if (!session) {
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: 'Session not found' }));
+      } else {
+        console.error(chalk.red(`✗ Session not found: ${sessionId}`));
+      }
+      process.exit(1);
+    }
+
+    if (!options.json) {
+      console.log(chalk.bold(`\nDownloading Sandbox Results\n`));
+      console.log(chalk.dim(`Sandbox ID: ${session.sandbox_id}`));
+      console.log(chalk.dim(`Output directory: ${options.output}`));
+    }
+
+    // Check if sandbox is still running (will attempt reconnection)
+    const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id, true);
+    if (!healthCheck.isHealthy) {
+      console.error(chalk.red(`✗ Sandbox not accessible: ${healthCheck.error}`));
+      process.exit(1);
+    }
+
+    // Get sandbox instance (reconnect if needed)
+    const sandbox = await sandboxManager.getOrReconnectSandbox(session.sandbox_id);
+    if (!sandbox) {
+      console.error(chalk.red('✗ Failed to connect to sandbox (may have been terminated)'));
+      process.exit(1);
+    }
+
+    // Create output directory
+    await fs.mkdir(options.output, { recursive: true });
+
+    // Download files
+    const downloadResult = await downloadChangedFiles(sandbox, '/workspace', options.output);
+
+    if (!downloadResult.success) {
+      console.error(chalk.red(`✗ Download failed: ${downloadResult.error}`));
+      process.exit(1);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        success: true,
+        sessionId,
+        sandboxId: session.sandbox_id,
+        outputPath: options.output,
+        filesDownloaded: downloadResult.filesDownloaded,
+        sizeBytes: downloadResult.sizeBytes
+      }, null, 2));
+    } else {
+      console.log(chalk.green(`\n✓ Downloaded ${downloadResult.filesDownloaded} files`));
+      console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
+      console.log(chalk.dim(`  Duration: ${(downloadResult.duration / 1000).toFixed(1)}s`));
+    }
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Download failed: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    coordinator.close();
+  }
+}
 
 /**
  * Download sandbox results
  */
-program
-  .command('sandbox-download')
+sandboxCmd
+  .command('download')
   .description('Download results from E2B sandbox to local directory (v1.0)')
   .requiredOption('--session-id <id>', 'Session ID')
   .requiredOption('--output <path>', 'Output directory for downloaded files')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    const coordinator = new Coordinator();
-    const sandboxManager = new SandboxManager(logger);
+  .action(handleSandboxDownload);
 
-    try {
-      // Validate E2B API key early
-      try {
-        SandboxManager.validateApiKey();
-      } catch (error) {
-        if (options.json) {
-          console.log(JSON.stringify({
-            success: false,
-            error: error instanceof Error ? error.message : 'E2B API key validation failed',
-            hint: 'Set E2B_API_KEY environment variable. Get your key from https://e2b.dev/dashboard'
-          }));
-        } else {
-          console.error(chalk.red(`✗ ${error instanceof Error ? error.message : 'E2B API key validation failed'}`));
-          console.error(chalk.dim('  Get your E2B API key from: https://e2b.dev/dashboard'));
-        }
-        process.exit(1);
-      }
+/**
+ * DEPRECATED: Use 'sandbox download' instead
+ */
+program
+  .command('sandbox-download')
+  .description('[DEPRECATED] Use "sandbox download" instead')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .requiredOption('--output <path>', 'Output directory for downloaded files')
+  .option('--json', 'Output as JSON')
+  .action(async (options: SandboxDownloadOptions) => {
+    showDeprecationWarning('sandbox-download', 'sandbox download');
+    await handleSandboxDownload(options);
+  });
 
-      const db = coordinator['db'];
-      const sessionId = options.sessionId;
+// Type definition for sandbox-kill options
+interface SandboxKillOptions {
+  sessionId: string;
+  json?: boolean;
+}
 
-      // Get E2B session
-      const sessions = db.listE2BSessions();
-      const session = sessions.find(s => s.id === sessionId);
+/**
+ * Shared handler for sandbox-kill functionality
+ */
+async function handleSandboxKill(options: SandboxKillOptions) {
+  const coordinator = new Coordinator();
+  const sandboxManager = new SandboxManager(logger);
 
-      if (!session) {
-        if (options.json) {
-          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
-        } else {
-          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
-        }
-        process.exit(1);
-      }
+  try {
+    const db = coordinator['db'];
+    const sessionId = options.sessionId;
 
-      if (!options.json) {
-        console.log(chalk.bold(`\nDownloading Sandbox Results\n`));
-        console.log(chalk.dim(`Sandbox ID: ${session.sandbox_id}`));
-        console.log(chalk.dim(`Output directory: ${options.output}`));
-      }
+    // Get E2B session
+    const sessions = db.listE2BSessions();
+    const session = sessions.find(s => s.id === sessionId);
 
-      // Check if sandbox is still running (will attempt reconnection)
-      const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id, true);
-      if (!healthCheck.isHealthy) {
-        console.error(chalk.red(`✗ Sandbox not accessible: ${healthCheck.error}`));
-        process.exit(1);
-      }
-
-      // Get sandbox instance (reconnect if needed)
-      const sandbox = await sandboxManager.getOrReconnectSandbox(session.sandbox_id);
-      if (!sandbox) {
-        console.error(chalk.red('✗ Failed to connect to sandbox (may have been terminated)'));
-        process.exit(1);
-      }
-
-      // Create output directory
-      await fs.mkdir(options.output, { recursive: true });
-
-      // Download files
-      const downloadResult = await downloadChangedFiles(sandbox, '/workspace', options.output);
-
-      if (!downloadResult.success) {
-        console.error(chalk.red(`✗ Download failed: ${downloadResult.error}`));
-        process.exit(1);
-      }
-
+    if (!session) {
       if (options.json) {
-        console.log(JSON.stringify({
-          success: true,
-          sessionId,
-          sandboxId: session.sandbox_id,
-          outputPath: options.output,
-          filesDownloaded: downloadResult.filesDownloaded,
-          sizeBytes: downloadResult.sizeBytes
-        }, null, 2));
+        console.log(JSON.stringify({ success: false, error: 'Session not found' }));
       } else {
-        console.log(chalk.green(`\n✓ Downloaded ${downloadResult.filesDownloaded} files`));
-        console.log(chalk.dim(`  Size: ${(downloadResult.sizeBytes / 1024 / 1024).toFixed(2)} MB`));
-        console.log(chalk.dim(`  Duration: ${(downloadResult.duration / 1000).toFixed(1)}s`));
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Download failed: ${errorMessage}`));
+        console.error(chalk.red(`✗ Session not found: ${sessionId}`));
       }
       process.exit(1);
-    } finally {
-      coordinator.close();
     }
-  });
+
+    if (!options.json) {
+      console.log(chalk.bold(`\nTerminating Sandbox: ${session.sandbox_id}\n`));
+    }
+
+    // Terminate sandbox
+    const termResult = await sandboxManager.terminateSandbox(session.sandbox_id);
+
+    if (!termResult.success) {
+      console.error(chalk.red(`✗ Termination failed: ${termResult.error}`));
+      process.exit(1);
+    }
+
+    // Cleanup database record
+    db.cleanupE2BSession(session.sandbox_id, SandboxStatus.FAILED, true);
+
+    // Release session if still active
+    const localSession = db.getSessionByPid(session.pid);
+    if (localSession) {
+      await coordinator.release(session.pid);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        success: true,
+        sessionId,
+        sandboxId: session.sandbox_id,
+        terminated: termResult.success,
+        cleanedUp: termResult.cleanedUp
+      }, null, 2));
+    } else {
+      console.log(chalk.green('\n✓ Sandbox terminated successfully'));
+      console.log(chalk.dim(`  Session: ${sessionId}`));
+      console.log(chalk.dim(`  Sandbox: ${session.sandbox_id}`));
+    }
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Termination failed: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    coordinator.close();
+  }
+}
 
 /**
  * Terminate sandbox
  */
-program
-  .command('sandbox-kill')
+sandboxCmd
+  .command('kill')
   .description('Terminate E2B sandbox and cleanup resources (v1.0)')
   .requiredOption('--session-id <id>', 'Session ID')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    const coordinator = new Coordinator();
-    const sandboxManager = new SandboxManager(logger);
+  .action(handleSandboxKill);
 
-    try {
-      const db = coordinator['db'];
-      const sessionId = options.sessionId;
-
-      // Get E2B session
-      const sessions = db.listE2BSessions();
-      const session = sessions.find(s => s.id === sessionId);
-
-      if (!session) {
-        if (options.json) {
-          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
-        } else {
-          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
-        }
-        process.exit(1);
-      }
-
-      if (!options.json) {
-        console.log(chalk.bold(`\nTerminating Sandbox: ${session.sandbox_id}\n`));
-      }
-
-      // Terminate sandbox
-      const termResult = await sandboxManager.terminateSandbox(session.sandbox_id);
-
-      if (!termResult.success) {
-        console.error(chalk.red(`✗ Termination failed: ${termResult.error}`));
-        process.exit(1);
-      }
-
-      // Cleanup database record
-      db.cleanupE2BSession(session.sandbox_id, SandboxStatus.FAILED, true);
-
-      // Release session if still active
-      const localSession = db.getSessionByPid(session.pid);
-      if (localSession) {
-        await coordinator.release(session.pid);
-      }
-
-      if (options.json) {
-        console.log(JSON.stringify({
-          success: true,
-          sessionId,
-          sandboxId: session.sandbox_id,
-          terminated: termResult.success,
-          cleanedUp: termResult.cleanedUp
-        }, null, 2));
-      } else {
-        console.log(chalk.green('\n✓ Sandbox terminated successfully'));
-        console.log(chalk.dim(`  Session: ${sessionId}`));
-        console.log(chalk.dim(`  Sandbox: ${session.sandbox_id}`));
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Termination failed: ${errorMessage}`));
-      }
-      process.exit(1);
-    } finally {
-      coordinator.close();
-    }
+/**
+ * DEPRECATED: Use 'sandbox kill' instead
+ */
+program
+  .command('sandbox-kill')
+  .description('[DEPRECATED] Use "sandbox kill" instead')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .option('--json', 'Output as JSON')
+  .action(async (options: SandboxKillOptions) => {
+    showDeprecationWarning('sandbox-kill', 'sandbox kill');
+    await handleSandboxKill(options);
   });
+
+// Type definition for sandbox-list options
+interface SandboxListOptions {
+  repo?: string;
+  json?: boolean;
+}
+
+/**
+ * Shared handler for sandbox-list functionality
+ */
+function handleSandboxList(options: SandboxListOptions) {
+  const coordinator = new Coordinator();
+  try {
+    const db = coordinator['db'];
+    const repoPath = options.repo ? path.resolve(options.repo) : undefined;
+
+    const sessions = db.listE2BSessions(repoPath);
+
+    if (options.json) {
+      console.log(JSON.stringify({ sessions, total: sessions.length }, null, 2));
+    } else {
+      console.log(chalk.bold(`\nE2B Sandbox Sessions: ${sessions.length}\n`));
+
+      if (sessions.length === 0) {
+        console.log(chalk.dim('  No E2B sessions found'));
+      } else {
+        for (const session of sessions) {
+          const statusColor =
+            session.status === SandboxStatus.COMPLETED ? chalk.green :
+            session.status === SandboxStatus.FAILED ? chalk.red :
+            session.status === SandboxStatus.TIMEOUT ? chalk.yellow :
+            chalk.blue;
+
+          console.log(`  ${statusColor('●')} ${session.id.substring(0, 8)}...`);
+          console.log(chalk.dim(`    Status: ${session.status}`));
+          console.log(chalk.dim(`    Sandbox: ${session.sandbox_id}`));
+          console.log(chalk.dim(`    Worktree: ${session.worktree_path}`));
+          console.log(chalk.dim(`    Created: ${session.created_at}`));
+          console.log(chalk.dim(`    Prompt: ${session.prompt.substring(0, 80)}${session.prompt.length > 80 ? '...' : ''}`));
+          console.log('');
+        }
+      }
+    }
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Failed to list sessions: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    coordinator.close();
+  }
+}
 
 /**
  * List all E2B sandbox sessions
  */
-program
-  .command('sandbox-list')
+sandboxCmd
+  .command('list')
   .description('List all E2B sandbox sessions (v1.0)')
   .option('--repo <path>', 'Filter by repository path')
   .option('--json', 'Output as JSON')
-  .action((options) => {
-    const coordinator = new Coordinator();
-    try {
-      const db = coordinator['db'];
-      const repoPath = options.repo ? path.resolve(options.repo) : undefined;
+  .action(handleSandboxList);
 
-      const sessions = db.listE2BSessions(repoPath);
+/**
+ * DEPRECATED: Use 'sandbox list' instead
+ */
+program
+  .command('sandbox-list')
+  .description('[DEPRECATED] Use "sandbox list" instead')
+  .option('--repo <path>', 'Filter by repository path')
+  .option('--json', 'Output as JSON')
+  .action((options: SandboxListOptions) => {
+    showDeprecationWarning('sandbox-list', 'sandbox list');
+    handleSandboxList(options);
+  });
 
+// Type definition for sandbox-status options
+interface SandboxStatusOptions {
+  sessionId: string;
+  json?: boolean;
+}
+
+/**
+ * Shared handler for sandbox-status functionality
+ */
+async function handleSandboxStatus(options: SandboxStatusOptions) {
+  const coordinator = new Coordinator();
+  const sandboxManager = new SandboxManager(logger);
+
+  try {
+    const db = coordinator['db'];
+    const sessionId = options.sessionId;
+
+    // Get E2B session
+    const sessions = db.listE2BSessions();
+    const session = sessions.find(s => s.id === sessionId);
+
+    if (!session) {
       if (options.json) {
-        console.log(JSON.stringify({ sessions, total: sessions.length }, null, 2));
+        console.log(JSON.stringify({ success: false, error: 'Session not found' }));
       } else {
-        console.log(chalk.bold(`\nE2B Sandbox Sessions: ${sessions.length}\n`));
-
-        if (sessions.length === 0) {
-          console.log(chalk.dim('  No E2B sessions found'));
-        } else {
-          for (const session of sessions) {
-            const statusColor =
-              session.status === SandboxStatus.COMPLETED ? chalk.green :
-              session.status === SandboxStatus.FAILED ? chalk.red :
-              session.status === SandboxStatus.TIMEOUT ? chalk.yellow :
-              chalk.blue;
-
-            console.log(`  ${statusColor('●')} ${session.id.substring(0, 8)}...`);
-            console.log(chalk.dim(`    Status: ${session.status}`));
-            console.log(chalk.dim(`    Sandbox: ${session.sandbox_id}`));
-            console.log(chalk.dim(`    Worktree: ${session.worktree_path}`));
-            console.log(chalk.dim(`    Created: ${session.created_at}`));
-            console.log(chalk.dim(`    Prompt: ${session.prompt.substring(0, 80)}${session.prompt.length > 80 ? '...' : ''}`));
-            console.log('');
-          }
-        }
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Failed to list sessions: ${errorMessage}`));
+        console.error(chalk.red(`✗ Session not found: ${sessionId}`));
       }
       process.exit(1);
-    } finally {
-      coordinator.close();
     }
-  });
+
+    if (!options.json) {
+      console.log(chalk.bold(`\nSandbox Status: ${session.sandbox_id}\n`));
+    }
+
+    // Check sandbox health
+    const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id);
+
+    // Calculate elapsed time
+    const createdAt = new Date(session.created_at);
+    const elapsedMinutes = (Date.now() - createdAt.getTime()) / 1000 / 60;
+
+    if (options.json) {
+      console.log(JSON.stringify({
+        success: true,
+        sessionId,
+        sandboxId: session.sandbox_id,
+        status: session.status,
+        health: {
+          isHealthy: healthCheck.isHealthy,
+          message: healthCheck.message,
+          error: healthCheck.error
+        },
+        createdAt: session.created_at,
+        elapsedMinutes: elapsedMinutes.toFixed(1),
+        prompt: session.prompt
+      }, null, 2));
+    } else {
+      const healthIcon = healthCheck.isHealthy ? chalk.green('✓') : chalk.red('✗');
+      console.log(`  ${healthIcon} Health: ${healthCheck.isHealthy ? 'Healthy' : 'Unhealthy'}`);
+      console.log(chalk.dim(`    Status: ${session.status}`));
+      console.log(chalk.dim(`    Sandbox ID: ${session.sandbox_id}`));
+      console.log(chalk.dim(`    Created: ${session.created_at}`));
+      console.log(chalk.dim(`    Elapsed: ${elapsedMinutes.toFixed(1)} minutes`));
+      console.log(chalk.dim(`    Worktree: ${session.worktree_path}`));
+
+      if (healthCheck.message) {
+        console.log(chalk.dim(`    Message: ${healthCheck.message}`));
+      }
+      if (healthCheck.error) {
+        console.log(chalk.red(`    Error: ${healthCheck.error}`));
+      }
+
+      console.log(chalk.dim(`\n  Prompt: ${session.prompt.substring(0, 200)}${session.prompt.length > 200 ? '...' : ''}`));
+      console.log('');
+    }
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`✗ Failed to get status: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    coordinator.close();
+  }
+}
 
 /**
  * Check sandbox health status
  */
-program
-  .command('sandbox-status')
+sandboxCmd
+  .command('status')
   .description('Check health status of E2B sandbox (v1.0)')
   .requiredOption('--session-id <id>', 'Session ID')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
-    const coordinator = new Coordinator();
-    const sandboxManager = new SandboxManager(logger);
+  .action(handleSandboxStatus);
 
-    try {
-      const db = coordinator['db'];
-      const sessionId = options.sessionId;
-
-      // Get E2B session
-      const sessions = db.listE2BSessions();
-      const session = sessions.find(s => s.id === sessionId);
-
-      if (!session) {
-        if (options.json) {
-          console.log(JSON.stringify({ success: false, error: 'Session not found' }));
-        } else {
-          console.error(chalk.red(`✗ Session not found: ${sessionId}`));
-        }
-        process.exit(1);
-      }
-
-      if (!options.json) {
-        console.log(chalk.bold(`\nSandbox Status: ${session.sandbox_id}\n`));
-      }
-
-      // Check sandbox health
-      const healthCheck = await sandboxManager.monitorSandboxHealth(session.sandbox_id);
-
-      // Calculate elapsed time
-      const createdAt = new Date(session.created_at);
-      const elapsedMinutes = (Date.now() - createdAt.getTime()) / 1000 / 60;
-
-      if (options.json) {
-        console.log(JSON.stringify({
-          success: true,
-          sessionId,
-          sandboxId: session.sandbox_id,
-          status: session.status,
-          health: {
-            isHealthy: healthCheck.isHealthy,
-            message: healthCheck.message,
-            error: healthCheck.error
-          },
-          createdAt: session.created_at,
-          elapsedMinutes: elapsedMinutes.toFixed(1),
-          prompt: session.prompt
-        }, null, 2));
-      } else {
-        const healthIcon = healthCheck.isHealthy ? chalk.green('✓') : chalk.red('✗');
-        console.log(`  ${healthIcon} Health: ${healthCheck.isHealthy ? 'Healthy' : 'Unhealthy'}`);
-        console.log(chalk.dim(`    Status: ${session.status}`));
-        console.log(chalk.dim(`    Sandbox ID: ${session.sandbox_id}`));
-        console.log(chalk.dim(`    Created: ${session.created_at}`));
-        console.log(chalk.dim(`    Elapsed: ${elapsedMinutes.toFixed(1)} minutes`));
-        console.log(chalk.dim(`    Worktree: ${session.worktree_path}`));
-
-        if (healthCheck.message) {
-          console.log(chalk.dim(`    Message: ${healthCheck.message}`));
-        }
-        if (healthCheck.error) {
-          console.log(chalk.red(`    Error: ${healthCheck.error}`));
-        }
-
-        console.log(chalk.dim(`\n  Prompt: ${session.prompt.substring(0, 200)}${session.prompt.length > 200 ? '...' : ''}`));
-        console.log('');
-      }
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      if (options.json) {
-        console.log(JSON.stringify({ success: false, error: errorMessage }));
-      } else {
-        console.error(chalk.red(`✗ Failed to get status: ${errorMessage}`));
-      }
-      process.exit(1);
-    } finally {
-      coordinator.close();
-    }
+/**
+ * DEPRECATED: Use 'sandbox status' instead
+ */
+program
+  .command('sandbox-status')
+  .description('[DEPRECATED] Use "sandbox status" instead')
+  .requiredOption('--session-id <id>', 'Session ID')
+  .option('--json', 'Output as JSON')
+  .action(async (options: SandboxStatusOptions) => {
+    showDeprecationWarning('sandbox-status', 'sandbox status');
+    await handleSandboxStatus(options);
   });
 
 // ============================================================================
