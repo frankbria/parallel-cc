@@ -45,10 +45,12 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Configure git identity and clear credentials
+      - name: Configure git identity and credentials
         if: |
           github.event.pull_request.changed_files >= 5 ||
           steps.calc.outputs.total >= 20
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Set git identity for the OpenCode action (required for any git operations)
           git config --global user.name "github-actions[bot]"
@@ -65,14 +67,16 @@ jobs:
           git config --global --unset-all credential.url || true
           git config --local --unset-all credential.url || true
           # Clear any includeIf configs that might add credentials
-          # Note: git config doesn't support wildcards, so we iterate over matching keys
-          # Use case-insensitive grep to catch both "includeIf" and "includeif"
           for key in $(git config --global --list --name-only 2>/dev/null | grep -i "^includeif\." || true); do
             git config --global --unset "$key" || true
           done
           for key in $(git config --local --list --name-only 2>/dev/null | grep -i "^includeif\." || true); do
             git config --local --unset "$key" || true
           done
+
+          # Configure git to use GITHUB_TOKEN for authentication via credential helper
+          # This allows git operations to work with the token passed to the action
+          git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
 
       - name: Run OpenCode PR Review
         # Only review substantial changes (5+ files OR 20+ lines changed)
