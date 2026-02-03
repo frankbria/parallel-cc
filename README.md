@@ -1,7 +1,7 @@
 # parallel-cc
 
 [![Follow on X](https://img.shields.io/twitter/follow/FrankBria18044?style=social)](https://x.com/FrankBria18044)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/frankbria/parallel-cc)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/frankbria/parallel-cc)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -11,8 +11,9 @@
 **parallel-cc** enables both interactive and autonomous Claude Code workflows:
 - **Local mode**: Parallel worktree coordination for interactive development
 - **E2B Sandbox mode**: Long-running autonomous execution in isolated cloud VMs
+- **Parallel Sandbox mode** (NEW): Execute multiple tasks simultaneously across sandboxes
 
-## 📑 Table of Contents
+## Table of Contents
 
 - [Features](#-features)
 - [The Problem](#the-problem)
@@ -32,45 +33,54 @@
 - [Contributing](#-contributing)
 - [License](#-license)
 
-## ✨ Features
+## Features
 
 ### Local Parallel Sessions
-- 🔄 **Automatic worktree creation** - No manual setup required
-- 🗄️ **SQLite-based coordination** - Fast, reliable session tracking
-- 🧹 **Auto-cleanup** - Worktrees removed when sessions end
-- 💓 **Heartbeat monitoring** - Detect and clean up stale sessions
-- 🎯 **Zero configuration** - Works out of the box
-- 🔀 **Merge detection** - Know when parallel branches are merged
-- ⚠️ **Conflict checking** - Preview rebase conflicts before they happen
-- 🤖 **MCP integration** - Claude can query session status and assist with rebases
-- 🔒 **File claims** - Coordinate exclusive/shared file access across parallel sessions
-- 🧠 **Conflict resolution** - Track and resolve semantic, structural, and concurrent edit conflicts
-- ⚡ **Auto-fix suggestions** - AI-generated conflict resolutions with confidence scores
-- 🔍 **AST analysis** - Deep semantic conflict detection using abstract syntax trees
+- **Automatic worktree creation** - No manual setup required
+- **SQLite-based coordination** - Fast, reliable session tracking
+- **Auto-cleanup** - Worktrees removed when sessions end
+- **Heartbeat monitoring** - Detect and clean up stale sessions
+- **Zero configuration** - Works out of the box
+- **Merge detection** - Know when parallel branches are merged
+- **Conflict checking** - Preview rebase conflicts before they happen
+- **MCP integration** - Claude can query session status and assist with rebases
+- **File claims** - Coordinate exclusive/shared file access across parallel sessions
+- **Conflict resolution** - Track and resolve semantic, structural, and concurrent edit conflicts
+- **Auto-fix suggestions** - AI-generated conflict resolutions with confidence scores
+- **AST analysis** - Deep semantic conflict detection using abstract syntax trees
 
 ### E2B Sandbox Execution
-- ☁️ **Cloud sandboxes** - Execute Claude Code in isolated E2B VMs
-- ⏱️ **Long-running tasks** - Up to 1 hour of uninterrupted execution
-- 🔐 **Security hardened** - Shell injection prevention, input validation, resource cleanup
-- 📦 **Intelligent file sync** - Compressed upload/download with selective sync
-- 🔄 **Cross-process reconnection** - Access sandboxes created in separate CLI invocations
-- 🎮 **Full CLI control** - Run, monitor, download, and kill sandbox sessions
-- 💰 **Cost tracking** - Automatic warnings at 30min and 50min usage marks
-- 🌿 **Branch management** - Auto-generate branches, custom naming, or uncommitted changes
-- 🚀 **Git Live mode** - Push directly to remote and create PRs automatically
-- 🔑 **Dual authentication** - Support for both API key and OAuth methods
+- **Cloud sandboxes** - Execute Claude Code in isolated E2B VMs
+- **Long-running tasks** - Up to 1 hour of uninterrupted execution
+- **Security hardened** - Shell injection prevention, input validation, resource cleanup
+- **Intelligent file sync** - Compressed upload/download with selective sync
+- **Cross-process reconnection** - Access sandboxes created in separate CLI invocations
+- **Full CLI control** - Run, monitor, download, and kill sandbox sessions
+- **Cost tracking** - Automatic warnings at 30min and 50min usage marks
+- **Branch management** - Auto-generate branches, custom naming, or uncommitted changes
+- **Git Live mode** - Push directly to remote and create PRs automatically
+- **Dual authentication** - Support for both API key and OAuth methods
+
+### Parallel Sandbox Execution (NEW in v2.1)
+- **Multi-task execution** - Run multiple tasks simultaneously across E2B sandboxes
+- **Configurable concurrency** - Control max parallel sandboxes (default: 3)
+- **Fail-fast mode** - Stop all tasks on first failure
+- **Progress monitoring** - Real-time status updates for each task
+- **Per-task isolation** - Each task gets its own worktree and sandbox
+- **Result aggregation** - Summary reports with timing and success metrics
+- **Time savings** - Execute tasks in parallel vs sequentially
 
 ## The Problem
 
 When you open multiple Claude Code sessions in the same repository, they can step on each other:
-- ❌ Git index locks when both try to commit
-- ❌ Build artifacts conflict
-- ❌ Dependencies get corrupted
-- ❌ General chaos ensues
+- Git index locks when both try to commit
+- Build artifacts conflict
+- Dependencies get corrupted
+- General chaos ensues
 
 ## The Solution
 
-✅ `parallel-cc` automatically detects when you're starting a parallel session and creates an isolated git worktree for you. Each Claude Code instance works in its own space, then changes merge cleanly.
+`parallel-cc` automatically detects when you're starting a parallel session and creates an isolated git worktree for you. Each Claude Code instance works in its own space, then changes merge cleanly.
 
 ## How It Works
 
@@ -87,13 +97,13 @@ When you open multiple Claude Code sessions in the same repository, they can ste
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 📋 Requirements
+## Requirements
 
 - **Node.js** 20+
 - **[gtr](https://github.com/coderabbitai/git-worktree-runner)** - Git worktree management
 - **jq** - JSON parsing in wrapper script
 
-## 🚀 Installation
+## Installation
 
 ```bash
 # Clone and install (interactive)
@@ -106,13 +116,13 @@ cd parallel-cc
 ```
 
 The install script will:
-1. ✅ Check all dependencies (Node.js 20+, git, jq, gtr)
-2. ✅ Build the TypeScript project
-3. ✅ Install CLI and wrapper scripts to `~/.local/bin`
-4. ✅ Create the database directory
-5. ✅ Verify installation with `parallel-cc doctor`
-6. ✅ **Prompt to install heartbeat hooks** (global or local) - or install automatically with `--all`
-7. ✅ Provide shell-specific setup instructions
+1. Check all dependencies (Node.js 20+, git, jq, gtr)
+2. Build the TypeScript project
+3. Install CLI and wrapper scripts to `~/.local/bin`
+4. Create the database directory
+5. Verify installation with `parallel-cc doctor`
+6. **Prompt to install heartbeat hooks** (global or local) - or install automatically with `--all`
+7. Provide shell-specific setup instructions
 
 **Non-interactive installation:**
 Use `./scripts/install.sh --all` to install everything automatically:
@@ -186,7 +196,7 @@ Or add manually to `~/.claude/settings.json`:
 }
 ```
 
-## 📖 Usage
+## Usage
 
 Just open multiple terminals and run `claude` (or `claude-parallel`) in each:
 
@@ -204,7 +214,7 @@ claude  # Automatically gets a worktree!
 
 That's it! Each session is isolated. When you're done, just exit claude normally - the worktree is cleaned up automatically.
 
-## 🔧 CLI Commands
+## CLI Commands
 
 ### System & Installation
 ```bash
@@ -288,7 +298,37 @@ parallel-cc sandbox kill --session-id <id>       # Terminate running sandbox
 parallel-cc sandbox run --dry-run --repo .       # Test setup without execution
 ```
 
-## 🔄 How Sessions Work
+### Parallel Sandbox Execution (NEW in v2.1)
+```bash
+# Execute multiple tasks in parallel
+parallel-cc sandbox run --repo . --multi --task "Implement auth" --task "Add tests" --task "Update docs"
+
+# Load tasks from file (one task per line)
+parallel-cc sandbox run --repo . --multi --task-file tasks.txt --max-concurrent 5
+
+# Fail-fast mode (stop all on first failure)
+parallel-cc sandbox run --repo . --multi --task "Task 1" --task "Task 2" --fail-fast
+
+# Combined with other options
+parallel-cc sandbox run --repo . --multi --task "Feature A" --task "Feature B" --auth-method oauth --max-concurrent 2
+```
+
+### Configuration & Budget
+```bash
+# Configuration management
+parallel-cc config set <key> <value>     # Set configuration value
+parallel-cc config get <key>             # Get configuration value
+parallel-cc config list                  # Display all config values
+
+# Budget tracking
+parallel-cc budget status                # Show budget/spending status
+
+# Templates
+parallel-cc templates list               # List sandbox templates
+parallel-cc templates show <name>        # Show template details
+```
+
+## How Sessions Work
 
 1. **First session** in a repo gets the main repository
 2. **Subsequent sessions** automatically get a new worktree
@@ -296,7 +336,7 @@ parallel-cc sandbox run --dry-run --repo .       # Test setup without execution
 4. **Stale detection** cleans up crashed sessions after 10 minutes
 5. **Auto-cleanup** removes worktrees when sessions end
 
-## ⚙️ Configuration
+## Configuration
 
 Default config (in `src/types.ts`):
 
@@ -309,7 +349,7 @@ Default config (in `src/types.ts`):
 }
 ```
 
-## 🔀 Merging Work from Worktrees
+## Merging Work from Worktrees
 
 After working in a worktree, you'll want to merge your changes:
 
@@ -327,7 +367,7 @@ cd ~/projects/myrepo  # Go to main repo
 git merge <worktree-branch-name>
 ```
 
-## 🚀 E2B Sandbox Integration
+## E2B Sandbox Integration
 
 Run autonomous Claude Code sessions in isolated cloud sandboxes for truly hands-free development.
 
@@ -365,6 +405,65 @@ git push origin HEAD:feature/my-feature
 - **Cost-Effective**: ~$0.10/hour for E2B compute time
 - **Git Integration**: Results automatically committed in worktrees for easy review
 
+### Parallel Sandbox Execution (NEW in v2.1)
+
+Execute multiple tasks simultaneously across E2B sandboxes for maximum throughput.
+
+**Basic Usage:**
+```bash
+# Run 3 tasks in parallel
+parallel-cc sandbox run --repo . --multi \
+  --task "Implement user authentication" \
+  --task "Add unit tests for API endpoints" \
+  --task "Update documentation"
+```
+
+**Load Tasks from File:**
+```bash
+# tasks.txt (one task per line)
+# Implement feature A
+# Add tests for feature A
+# Update API documentation
+
+parallel-cc sandbox run --repo . --multi --task-file tasks.txt
+```
+
+**Configurable Concurrency:**
+```bash
+# Limit to 2 parallel sandboxes (default: 3)
+parallel-cc sandbox run --repo . --multi --task "Task 1" --task "Task 2" --task "Task 3" --max-concurrent 2
+
+# Run up to 5 sandboxes simultaneously
+parallel-cc sandbox run --repo . --multi --task-file large-task-list.txt --max-concurrent 5
+```
+
+**Fail-Fast Mode:**
+```bash
+# Stop all tasks immediately if any task fails
+parallel-cc sandbox run --repo . --multi --task "Critical setup" --task "Dependent work" --fail-fast
+```
+
+**How Parallel Execution Works:**
+1. Each task gets its own isolated worktree via the Coordinator
+2. Each task runs in its own E2B sandbox instance
+3. Results are downloaded to separate directories under `./parallel-results/`
+4. A summary report is generated with timing metrics and success rates
+
+**Output Structure:**
+```
+parallel-results/
+├── task-1/           # Results from first task
+├── task-2/           # Results from second task
+├── task-3/           # Results from third task
+└── summary-report.md # Execution summary with metrics
+```
+
+**Benefits:**
+- **Time Savings**: Run 3 one-hour tasks in ~1 hour instead of ~3 hours
+- **Isolation**: Tasks can't interfere with each other
+- **Visibility**: Real-time progress updates for each task
+- **Flexibility**: Mix with other options (auth, templates, budget limits)
+
 ### Branch Management Modes
 
 **1. Uncommitted Changes (Default)**
@@ -375,9 +474,9 @@ parallel-cc sandbox run --repo . --prompt "Fix issue #84"
 ```
 
 **Benefits:**
-- ✅ Full control over commit message and branch name
-- ✅ Review changes before committing
-- ✅ Stage changes selectively
+- Full control over commit message and branch name
+- Review changes before committing
+- Stage changes selectively
 
 **2. Auto-Generated Branch**
 ```bash
@@ -387,9 +486,9 @@ parallel-cc sandbox run --repo . --prompt "Fix issue #84" --branch auto
 ```
 
 **Benefits:**
-- ✅ One-step branch creation and commit
-- ✅ Descriptive branch name from prompt
-- ✅ Ready to push immediately
+- One-step branch creation and commit
+- Descriptive branch name from prompt
+- Ready to push immediately
 
 **3. Custom Branch Name**
 ```bash
@@ -398,11 +497,11 @@ parallel-cc sandbox run --repo . --prompt "Fix issue #84" --branch feature/issue
 ```
 
 **Benefits:**
-- ✅ Control over branch naming convention
-- ✅ Matches team's branch patterns
-- ✅ One-step creation and commit
+- Control over branch naming convention
+- Matches team's branch patterns
+- One-step creation and commit
 
-### Git Live Mode (NEW!)
+### Git Live Mode
 
 **What is Git Live Mode?**
 
@@ -445,17 +544,17 @@ When `--git-live` is used with multiple parallel sessions active, you'll see a w
 - **Switch** (`n`): Automatically fall back to download mode
 
 **When to Use Git Live:**
-- ✅ Single autonomous task with clear scope
-- ✅ No other parallel sessions active
-- ✅ Want immediate PR for review
-- ✅ Trust the execution quality
-- ✅ "Walk away and review later" workflow
+- Single autonomous task with clear scope
+- No other parallel sessions active
+- Want immediate PR for review
+- Trust the execution quality
+- "Walk away and review later" workflow
 
 **When to Use Download Mode (Default):**
-- ✅ Multiple parallel sessions
-- ✅ Want to review changes before committing
-- ✅ Need to stage changes selectively
-- ✅ Interactive development workflow
+- Multiple parallel sessions
+- Want to review changes before committing
+- Need to stage changes selectively
+- Interactive development workflow
 
 ### Authentication Methods
 
@@ -498,6 +597,15 @@ parallel-cc sandbox run \
   --git-live \
   --branch feature/issue-123 \
   --target-branch develop
+
+# Parallel execution with multiple tasks
+parallel-cc sandbox run \
+  --repo . \
+  --multi \
+  --task "Implement feature A" \
+  --task "Implement feature B" \
+  --task "Add integration tests" \
+  --max-concurrent 3
 ```
 
 ### Setup Requirements
@@ -513,12 +621,26 @@ parallel-cc sandbox run \
 See [docs/E2B_GUIDE.md](./docs/E2B_GUIDE.md) for complete setup instructions and troubleshooting.
 See [docs/REFERENCE.md](./docs/REFERENCE.md) for database schema, MCP tools, and technical specifications.
 
-## 🎉 What's New
+## What's New
+
+### v2.1.0 - Parallel Sandbox Execution (February 2026)
+
+**New Features:**
+- **Parallel Task Execution** - Execute multiple tasks simultaneously across E2B sandboxes
+  - `--multi` flag enables parallel mode
+  - `--task` option (repeatable) for specifying multiple tasks
+  - `--task-file` option to load tasks from a file
+  - `--max-concurrent` to control parallelism (default: 3)
+  - `--fail-fast` to stop all tasks on first failure
+- **Per-Task Isolation** - Each task gets its own worktree and sandbox
+- **Progress Monitoring** - Real-time status updates for each parallel task
+- **Result Aggregation** - Summary reports with timing metrics and success rates
+- **Improved Input Validation** - Enhanced validation for `--multi` mode arguments
 
 ### v2.0.0 - CLI Modernization (February 2026)
 
 **Breaking Changes:**
-- 🔄 **Subcommand Structure** - Commands now use proper subcommand format
+- **Subcommand Structure** - Commands now use proper subcommand format
   - `sandbox run` instead of `sandbox-run`
   - `mcp serve` instead of `mcp-serve`
   - `watch merges` instead of `watch-merges`
@@ -526,25 +648,25 @@ See [docs/REFERENCE.md](./docs/REFERENCE.md) for database schema, MCP tools, and
   - Will be removed in v3.0.0
 
 **New Features:**
-- 💰 **Budget Tracking** - Set daily/weekly/monthly spending limits
-- ⚙️ **Config Management** - `config set/get/list` commands for settings
+- **Budget Tracking** - Set daily/weekly/monthly spending limits
+- **Config Management** - `config set/get/list` commands for settings
 
 ### v1.0.0 - Git Live Mode & Enhanced Branch Management (December 2024)
 
 **New Features:**
-- 🚀 **Git Live Mode** - Autonomous PR creation directly from E2B sandboxes
+- **Git Live Mode** - Autonomous PR creation directly from E2B sandboxes
   - Push results to remote branches automatically
   - Create pull requests with `gh` CLI integration
   - Parallel session detection and warnings
   - Configurable target branches
 
-- 🌿 **Enhanced Branch Management**
+- **Enhanced Branch Management**
   - `--branch auto` - Auto-generate descriptive branch names from prompts
   - `--branch <name>` - Custom branch naming
   - Default mode: Uncommitted changes for full control
   - Smart branch name slugification (max 50 chars, kebab-case)
 
-- 🔧 **Installation Improvements**
+- **Installation Improvements**
   - `./scripts/install.sh --all` - Non-interactive installation
   - Automatic setup of hooks, alias, and MCP server
   - Ideal for automation and CI/CD pipelines
@@ -561,47 +683,39 @@ See [docs/REFERENCE.md](./docs/REFERENCE.md) for database schema, MCP tools, and
 - Better file sync reliability for E2B downloads
 - Migration system improvements with automatic updates
 
-### v1.0.0 - E2B Sandbox Integration (December 2024)
-
-**Major Features:**
-- ☁️ E2B cloud sandbox execution for autonomous development
-- 🔑 Dual authentication support (API key and OAuth)
-- 📦 Intelligent file sync with compression
-- 💰 Cost tracking and warnings
-- 🔒 Enhanced security with shell injection prevention
-
 See [ROADMAP.md](./ROADMAP.md) for detailed version history and future plans.
 
-## 🗺️ Roadmap
+## Roadmap
 
-### Current Version: v2.0 🚀
+### Current Version: v2.1
 
 **Core Features:**
-- ✅ Parallel worktree coordination with automatic session management
-- ✅ SQLite-based session tracking with heartbeat monitoring
-- ✅ MCP server integration with 16 tools for Claude Code
-- ✅ Branch merge detection and rebase assistance
-- ✅ Advanced conflict resolution with AST analysis
-- ✅ AI-powered auto-fix suggestions with confidence scoring
-- ✅ E2B sandbox integration for autonomous execution
-- ✅ Plan-driven workflows with real-time monitoring
-- ✅ Git Live mode for autonomous PR creation
-- ✅ Sandbox templates (Node.js, Python, Next.js)
-- ✅ SSH key injection for private repositories
-- ✅ Budget tracking and cost controls
-- ✅ Modern subcommand CLI structure
+- Parallel worktree coordination with automatic session management
+- SQLite-based session tracking with heartbeat monitoring
+- MCP server integration with 16 tools for Claude Code
+- Branch merge detection and rebase assistance
+- Advanced conflict resolution with AST analysis
+- AI-powered auto-fix suggestions with confidence scoring
+- E2B sandbox integration for autonomous execution
+- Plan-driven workflows with real-time monitoring
+- Git Live mode for autonomous PR creation
+- Sandbox templates (Node.js, Python, Next.js)
+- SSH key injection for private repositories
+- Budget tracking and cost controls
+- Modern subcommand CLI structure
+- **Parallel sandbox execution (multiple tasks simultaneously)**
 
 ### What's Next
 
-**v2.1 - Enhanced Sandbox Features** (Planned)
-- [ ] Parallel sandbox execution (multiple tasks simultaneously)
+**v2.2 - Enhanced Parallel Features** (Planned)
 - [ ] Pause/resume functionality for long-running tasks
-- [ ] Enhanced cost reporting and analytics
+- [ ] Enhanced cost reporting and analytics per task
 - [ ] Custom sandbox templates from project detection
+- [ ] Task dependency graphs for sequential-then-parallel workflows
 
 See [ROADMAP.md](./ROADMAP.md) for detailed specifications, implementation plans, and complete version history.
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### "parallel-cc not found"
 
@@ -653,14 +767,26 @@ export E2B_API_KEY="your-key-here"
 export GITHUB_TOKEN="ghp_..."  # Get from https://github.com/settings/tokens
 ```
 
-## 🤝 Contributing
+### Parallel Execution Issues
+
+**"ParallelExecutor requires at least one task"**
+- Ensure you're using `--task` or `--task-file` with `--multi`
+
+**Tasks completing too slowly**
+- Increase `--max-concurrent` (but watch E2B costs)
+- Check individual task complexity
+
+**Fail-fast not stopping other tasks**
+- This is expected for tasks already running; only pending tasks are cancelled
+
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
-## 📄 License
+## License
 
 MIT © [Frank Bria](https://github.com/frankbria)
 
 ---
 
-**Built with ❤️ using TypeScript, SQLite, and git worktrees**
+**Built with TypeScript, SQLite, and git worktrees**
