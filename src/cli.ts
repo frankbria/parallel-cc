@@ -2393,11 +2393,24 @@ async function handleSandboxRunMulti(options: SandboxRunOptions) {
       process.exit(1);
     }
 
-    // Step 2: Validate authentication
-    const authMethod = options.authMethod as 'api-key' | 'oauth';
+    // Step 2: Validate authentication method
+    const authMethod = options.authMethod as string;
+    if (authMethod !== 'api-key' && authMethod !== 'oauth') {
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: false,
+          error: `Invalid auth method: ${authMethod}. Must be 'api-key' or 'oauth'`
+        }));
+      } else {
+        console.error(chalk.red(`✗ Invalid auth method: ${authMethod}`));
+        console.log(chalk.dim("Valid options: 'api-key' or 'oauth'"));
+      }
+      process.exit(1);
+    }
+    const validatedAuthMethod = authMethod as 'api-key' | 'oauth';
     let oauthCredentials: string | undefined;
 
-    if (authMethod === 'api-key') {
+    if (validatedAuthMethod === 'api-key') {
       if (!process.env.ANTHROPIC_API_KEY) {
         if (options.json) {
           console.log(JSON.stringify({
@@ -2410,7 +2423,7 @@ async function handleSandboxRunMulti(options: SandboxRunOptions) {
         }
         process.exit(1);
       }
-    } else if (authMethod === 'oauth') {
+    } else if (validatedAuthMethod === 'oauth') {
       const credentialsPath = path.join(os.homedir(), '.claude', '.credentials.json');
       if (!existsSync(credentialsPath)) {
         if (options.json) {
@@ -2456,6 +2469,21 @@ async function handleSandboxRunMulti(options: SandboxRunOptions) {
     const outputDir = path.resolve(options.outputDir || './parallel-results');
     await fs.mkdir(outputDir, { recursive: true });
 
+    // Step 5.5: Validate maxConcurrent
+    const parsedMaxConcurrent = parseInt(options.maxConcurrent || '3', 10);
+    if (!Number.isFinite(parsedMaxConcurrent) || parsedMaxConcurrent < 1) {
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: false,
+          error: `Invalid maxConcurrent value: ${options.maxConcurrent}. Must be a positive integer`
+        }));
+      } else {
+        console.error(chalk.red(`✗ Invalid maxConcurrent value: ${options.maxConcurrent}`));
+        console.log(chalk.dim('Must be a positive integer (e.g., 1, 3, 5)'));
+      }
+      process.exit(1);
+    }
+
     // Step 6: Create sandbox manager
     const sandboxImage = options.template ||
                          (process.env.E2B_TEMPLATE?.trim() || '') ||
@@ -2465,11 +2493,11 @@ async function handleSandboxRunMulti(options: SandboxRunOptions) {
     // Step 7: Build configuration
     const config = {
       tasks,
-      maxConcurrent: parseInt(options.maxConcurrent || '3', 10),
+      maxConcurrent: parsedMaxConcurrent,
       failFast: options.failFast || false,
       outputDir,
       repoPath,
-      authMethod,
+      authMethod: validatedAuthMethod,
       sandboxImage: options.template,
       templateName: options.useTemplate,
       branch: options.branch,

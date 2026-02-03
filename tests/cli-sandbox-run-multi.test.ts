@@ -10,31 +10,29 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { execSync, spawn } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
 // Helper to run CLI command and capture output
+// Uses spawnSync with array args to preserve quoted arguments with spaces
 function runCli(args: string[], options: { env?: Record<string, string> } = {}): {
   stdout: string;
   stderr: string;
   exitCode: number | null;
 } {
-  try {
-    const stdout = execSync(`node dist/cli.js ${args.join(' ')}`, {
-      encoding: 'utf-8',
-      env: { ...process.env, ...options.env },
-      timeout: 5000
-    });
-    return { stdout, stderr: '', exitCode: 0 };
-  } catch (error: any) {
-    return {
-      stdout: error.stdout || '',
-      stderr: error.stderr || '',
-      exitCode: error.status || 1
-    };
-  }
+  const result = spawnSync('node', ['dist/cli.js', ...args], {
+    encoding: 'utf-8',
+    env: { ...process.env, ...options.env },
+    timeout: 5000
+  });
+
+  return {
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    exitCode: result.status
+  };
 }
 
 describe('sandbox run --multi CLI', () => {

@@ -387,6 +387,14 @@ export class ParallelExecutor {
 
       const downloadResult = await downloadChangedFiles(sandbox, '/workspace', downloadPath);
 
+      // Track overall success (execution AND download must both succeed)
+      const overallSuccess = executionResult.success && downloadResult.success;
+      const overallError = downloadResult.success
+        ? executionResult.error
+        : executionResult.error
+          ? `${executionResult.error}; Download failed: ${downloadResult.error}`
+          : `Download failed: ${downloadResult.error}`;
+
       // Step 5: Save execution log
       const logPath = path.join(outputPath, 'execution.log');
       const logContent = executionResult.fullOutput || executionResult.output || '';
@@ -400,16 +408,18 @@ export class ParallelExecutor {
         exitCode: executionResult.exitCode,
         executionTime: executionResult.executionTime,
         filesDownloaded: downloadResult.filesDownloaded,
-        success: executionResult.success,
+        success: overallSuccess,
         state: executionResult.state,
-        error: executionResult.error
+        error: overallError,
+        downloadSuccess: downloadResult.success,
+        downloadError: downloadResult.error
       }, null, 2));
 
       return {
-        success: executionResult.success,
+        success: overallSuccess,
         exitCode: executionResult.exitCode,
         filesChanged: downloadResult.filesDownloaded,
-        error: executionResult.error
+        error: overallError
       };
 
     } finally {
