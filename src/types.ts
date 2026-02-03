@@ -747,3 +747,149 @@ export interface ProjectTypeDetection {
   reason?: string;
   detectedFiles?: string[];
 }
+
+// ============================================================================
+// Parallel Execution Types (v2.1)
+// ============================================================================
+
+/**
+ * Status of a parallel task
+ */
+export type ParallelTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * Configuration for parallel sandbox execution
+ */
+export interface ParallelExecutionConfig {
+  /** Array of task descriptions (prompts) */
+  tasks: string[];
+  /** Maximum concurrent sandboxes (default: 3) */
+  maxConcurrent: number;
+  /** Stop all tasks on first failure (default: false) */
+  failFast: boolean;
+  /** Directory for results (default: ./parallel-results) */
+  outputDir: string;
+  /** Repository path */
+  repoPath: string;
+  /** Authentication method: 'api-key' or 'oauth' */
+  authMethod: 'api-key' | 'oauth';
+  /** E2B sandbox template */
+  sandboxImage?: string;
+  /** Managed template name */
+  templateName?: string;
+  /** Branch strategy per task */
+  branch?: string;
+  /** Whether to use git-live mode */
+  gitLive: boolean;
+  /** Target branch for PRs in git-live mode */
+  targetBranch: string;
+  /** Git user name for commits */
+  gitUser?: string;
+  /** Git user email for commits */
+  gitEmail?: string;
+  /** OAuth credentials (if using oauth auth) */
+  oauthCredentials?: string;
+  /** Budget limit per task in USD */
+  budgetPerTask?: number;
+  /** NPM token for private packages */
+  npmToken?: string;
+  /** Custom NPM registry URL */
+  npmRegistry?: string;
+  /** SSH key path for private repos */
+  sshKeyPath?: string;
+}
+
+/**
+ * Result of a single parallel task execution
+ */
+export interface TaskResult {
+  /** Unique task identifier (e.g., "task-1") */
+  taskId: string;
+  /** Original task description/prompt */
+  taskDescription: string;
+  /** Session UUID */
+  sessionId: string;
+  /** E2B sandbox ID */
+  sandboxId: string;
+  /** Isolated worktree path */
+  worktreePath: string;
+  /** Current task status */
+  status: ParallelTaskStatus;
+  /** Execution start time */
+  startTime: Date;
+  /** Execution end time (if completed) */
+  endTime?: Date;
+  /** Execution duration in milliseconds */
+  duration?: number;
+  /** Number of files modified */
+  filesChanged: number;
+  /** Where results were downloaded */
+  outputPath: string;
+  /** Error message (if failed) */
+  error?: string;
+  /** Exit code from Claude execution */
+  exitCode?: number;
+  /** Estimated cost in USD */
+  costEstimate?: number;
+}
+
+/**
+ * Summary of parallel execution
+ */
+export interface ParallelExecutionSummary {
+  /** Total wall-clock execution time in milliseconds */
+  totalDuration: number;
+  /** Sum of all individual task durations (for comparison) */
+  sequentialDuration: number;
+  /** Time saved compared to sequential execution */
+  timeSaved: number;
+  /** Number of successful tasks */
+  successCount: number;
+  /** Number of failed tasks */
+  failureCount: number;
+  /** Number of cancelled tasks (due to fail-fast) */
+  cancelledCount: number;
+  /** Total files changed across all tasks */
+  totalFilesChanged: number;
+  /** Total estimated cost in USD */
+  totalCost: number;
+  /** Batch ID for database tracking */
+  batchId: string;
+}
+
+/**
+ * Combined result of parallel execution
+ */
+export interface ParallelExecutionResult {
+  /** Whether all tasks succeeded */
+  success: boolean;
+  /** Individual task results */
+  tasks: TaskResult[];
+  /** Execution summary */
+  summary: ParallelExecutionSummary;
+  /** Path to summary report file */
+  reportPath?: string;
+}
+
+/**
+ * Progress update for parallel execution
+ */
+export interface ParallelProgressUpdate {
+  /** Task ID being updated */
+  taskId: string;
+  /** New status */
+  status: ParallelTaskStatus;
+  /** Progress message */
+  message: string;
+  /** Elapsed time for this task */
+  elapsed?: number;
+  /** Total tasks in batch */
+  totalTasks: number;
+  /** Completed task count */
+  completedTasks: number;
+}
+
+/**
+ * Callback for parallel execution progress
+ */
+export type ParallelProgressCallback = (update: ParallelProgressUpdate) => void;

@@ -34,6 +34,7 @@ import { executeClaudeInSandbox } from './e2b/claude-runner.js';
 import { pushToRemoteAndCreatePR } from './e2b/git-live.js';
 import { validateSSHKeyPath, injectSSHKey, cleanupSSHKey, getSecurityWarning } from './e2b/ssh-key-injector.js';
 import { TemplateManager, validateTemplateName, validateTemplate } from './e2b/templates.js';
+import { ParallelExecutor } from './e2b/parallel-executor.js';
 import { ConfigManager, DEFAULT_CONFIG_PATH } from './config.js';
 import { BudgetTracker } from './budget-tracker.js';
 import { logger } from './logger.js';
@@ -42,7 +43,7 @@ import { existsSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
-import { SandboxStatus, type BudgetConfig, type E2BSession, type StatusResult, type SessionInfo } from './types.js';
+import { SandboxStatus, type BudgetConfig, type E2BSession, type StatusResult, type SessionInfo, type ParallelProgressUpdate } from './types.js';
 import { showDeprecationWarning, DEPRECATED_COMMANDS } from './cli-deprecation.js';
 
 program
@@ -1486,6 +1487,13 @@ interface SandboxRunOptions {
   npmRegistry: string;
   budget?: string;
   json?: boolean;
+  // Multi-task parallel execution options (v2.1)
+  multi?: boolean;
+  task?: string[];
+  taskFile?: string;
+  maxConcurrent?: string;
+  failFast?: boolean;
+  outputDir?: string;
 }
 
 /**
@@ -1532,7 +1540,25 @@ Examples:
   parallel-cc sandbox run --repo . --prompt "Install deps" --npm-token "npm_xxx"
 
   # Custom NPM registry
-  parallel-cc sandbox run --repo . --prompt "Task" --npm-token "xxx" --npm-registry "https://npm.company.com"`)
+  parallel-cc sandbox run --repo . --prompt "Task" --npm-token "xxx" --npm-registry "https://npm.company.com"
+
+Parallel Execution (v2.1):
+  --multi                 Execute multiple tasks in parallel
+  --task <text>           Task description (repeatable for multiple tasks)
+  --task-file <path>      File with one task per line
+  --max-concurrent <n>    Max parallel sandboxes (default: 3)
+  --fail-fast             Stop all tasks on first failure
+  --output-dir <path>     Results directory (default: ./parallel-results)
+
+Examples (parallel):
+  # Execute multiple tasks in parallel
+  parallel-cc sandbox run --repo . --multi --task "Implement auth" --task "Add tests" --task "Update docs"
+
+  # Load tasks from file
+  parallel-cc sandbox run --repo . --multi --task-file tasks.txt --max-concurrent 5
+
+  # Fail fast mode (stop on first failure)
+  parallel-cc sandbox run --repo . --multi --task "Task 1" --task "Task 2" --fail-fast`)
   .requiredOption('--repo <path>', 'Repository path')
   .option('--prompt <text>', 'Prompt text to execute')
   .option('--prompt-file <path>', 'Path to prompt file (e.g., PLAN.md, .apm/Implementation_Plan.md)')
@@ -1551,12 +1577,24 @@ Examples:
   .option('--npm-registry <url>', 'Custom NPM registry URL (default: https://registry.npmjs.org)', 'https://registry.npmjs.org')
   .option('--budget <amount>', 'Per-session budget limit in USD (e.g., 0.50 for $0.50)')
   .option('--json', 'Output as JSON')
+  // Multi-task parallel execution options (v2.1)
+  .option('--multi', 'Execute multiple tasks in parallel')
+  .option('--task <text...>', 'Task description (repeatable for multiple tasks)')
+  .option('--task-file <path>', 'File with one task per line')
+  .option('--max-concurrent <n>', 'Max parallel sandboxes (default: 3)', '3')
+  .option('--fail-fast', 'Stop all tasks on first failure')
+  .option('--output-dir <path>', 'Results directory (default: ./parallel-results)', './parallel-results')
   .action(handleSandboxRun);
 
 /**
  * Shared handler for sandbox-run functionality
  */
 async function handleSandboxRun(options: SandboxRunOptions) {
+    // Check for multi-task mode (v2.1)
+    if (options.multi) {
+      return handleSandboxRunMulti(options);
+    }
+
     const coordinator = new Coordinator();
     let sandboxId: string | null = null;
     let sandboxManager: SandboxManager | null = null;
@@ -2306,6 +2344,272 @@ async function handleSandboxRun(options: SandboxRunOptions) {
     } finally {
       coordinator.close();
     }
+}
+
+/**
+ * Handler for multi-task parallel sandbox execution (v2.1)
+ */
+async function handleSandboxRunMulti(options: SandboxRunOptions) {
+  const coordinator = new Coordinator();
+
+  try {
+    // Step 1: Collect tasks from --task flags or --task-file
+    let tasks: string[] = [];
+
+    if (options.task && options.task.length > 0) {
+      tasks = options.task;
+    }
+
+    if (options.taskFile) {
+      const taskFilePath = path.resolve(options.taskFile);
+      if (!existsSync(taskFilePath)) {
+        if (options.json) {
+          console.log(JSON.stringify({ success: false, error: `Task file not found: ${taskFilePath}` }));
+        } else {
+          console.error(chalk.red(`✗ Task file not found: ${taskFilePath}`));
+        }
+        process.exit(1);
+      }
+
+      const fileContent = await fs.readFile(taskFilePath, 'utf-8');
+      const fileTasks = fileContent
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0 && !line.startsWith('#'));
+
+      tasks = [...tasks, ...fileTasks];
+    }
+
+    if (tasks.length === 0) {
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: false,
+          error: 'No tasks provided. Use --task or --task-file to specify tasks'
+        }));
+      } else {
+        console.error(chalk.red('✗ No tasks provided'));
+        console.log(chalk.dim('Use --task "description" (repeatable) or --task-file <path> to specify tasks'));
+      }
+      process.exit(1);
+    }
+
+    // Step 2: Validate authentication
+    const authMethod = options.authMethod as 'api-key' | 'oauth';
+    let oauthCredentials: string | undefined;
+
+    if (authMethod === 'api-key') {
+      if (!process.env.ANTHROPIC_API_KEY) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: 'ANTHROPIC_API_KEY environment variable not set'
+          }));
+        } else {
+          console.error(chalk.red('✗ ANTHROPIC_API_KEY environment variable not set'));
+          console.log(chalk.dim('Set ANTHROPIC_API_KEY or use --auth-method oauth'));
+        }
+        process.exit(1);
+      }
+    } else if (authMethod === 'oauth') {
+      const credentialsPath = path.join(os.homedir(), '.claude', '.credentials.json');
+      if (!existsSync(credentialsPath)) {
+        if (options.json) {
+          console.log(JSON.stringify({
+            success: false,
+            error: 'OAuth credentials not found. Run "claude /login" first'
+          }));
+        } else {
+          console.error(chalk.red('✗ OAuth credentials not found'));
+          console.log(chalk.dim('Run "claude /login" to authenticate with your Claude subscription'));
+        }
+        process.exit(1);
+      }
+      oauthCredentials = await fs.readFile(credentialsPath, 'utf-8');
+    }
+
+    // Step 3: Validate E2B API key
+    if (!process.env.E2B_API_KEY) {
+      if (options.json) {
+        console.log(JSON.stringify({
+          success: false,
+          error: 'E2B_API_KEY environment variable not set'
+        }));
+      } else {
+        console.error(chalk.red('✗ E2B_API_KEY environment variable not set'));
+        console.log(chalk.dim('Set E2B_API_KEY to use E2B sandbox execution'));
+      }
+      process.exit(1);
+    }
+
+    // Step 4: Resolve repository path
+    const repoPath = path.resolve(options.repo);
+    if (!existsSync(repoPath)) {
+      if (options.json) {
+        console.log(JSON.stringify({ success: false, error: `Repository path not found: ${repoPath}` }));
+      } else {
+        console.error(chalk.red(`✗ Repository path not found: ${repoPath}`));
+      }
+      process.exit(1);
+    }
+
+    // Step 5: Create output directory
+    const outputDir = path.resolve(options.outputDir || './parallel-results');
+    await fs.mkdir(outputDir, { recursive: true });
+
+    // Step 6: Create sandbox manager
+    const sandboxImage = options.template ||
+                         (process.env.E2B_TEMPLATE?.trim() || '') ||
+                         'anthropic-claude-code';
+    const sandboxManager = new SandboxManager(logger, { sandboxImage });
+
+    // Step 7: Build configuration
+    const config = {
+      tasks,
+      maxConcurrent: parseInt(options.maxConcurrent || '3', 10),
+      failFast: options.failFast || false,
+      outputDir,
+      repoPath,
+      authMethod,
+      sandboxImage: options.template,
+      templateName: options.useTemplate,
+      branch: options.branch,
+      gitLive: options.gitLive || false,
+      targetBranch: options.targetBranch || 'main',
+      gitUser: options.gitUser,
+      gitEmail: options.gitEmail,
+      oauthCredentials,
+      budgetPerTask: options.budget ? parseFloat(options.budget) : undefined,
+      npmToken: options.npmToken || process.env.PARALLEL_CC_NPM_TOKEN,
+      npmRegistry: options.npmRegistry,
+      sshKeyPath: options.sshKey
+    };
+
+    // Step 8: Display execution plan
+    if (!options.json) {
+      console.log(chalk.bold('\n📦 Parallel Sandbox Execution'));
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log(`Tasks: ${tasks.length}`);
+      console.log(`Max concurrent: ${config.maxConcurrent}`);
+      console.log(`Fail-fast: ${config.failFast ? 'Yes' : 'No'}`);
+      console.log(`Output directory: ${outputDir}`);
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log('Tasks:');
+      tasks.forEach((task, i) => {
+        console.log(`  ${i + 1}. ${task.substring(0, 60)}${task.length > 60 ? '...' : ''}`);
+      });
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log('');
+    }
+
+    // Step 9: Create and execute ParallelExecutor
+    const executor = new ParallelExecutor(config, coordinator, sandboxManager, logger);
+
+    // Progress callback for non-JSON mode
+    const onProgress = options.json ? undefined : (update: import('./types.js').ParallelProgressUpdate) => {
+      const statusIcon = update.status === 'running' ? '●' :
+                         update.status === 'completed' ? '✓' :
+                         update.status === 'failed' ? '✗' :
+                         update.status === 'cancelled' ? '○' : '?';
+
+      const statusColor = update.status === 'running' ? chalk.blue :
+                          update.status === 'completed' ? chalk.green :
+                          update.status === 'failed' ? chalk.red :
+                          chalk.gray;
+
+      console.log(statusColor(`[${update.taskId}] ${statusIcon} ${update.message}`));
+
+      // Show overall progress
+      const percent = Math.round((update.completedTasks / update.totalTasks) * 100);
+      if (update.completedTasks > 0) {
+        console.log(chalk.dim(`  Progress: ${update.completedTasks}/${update.totalTasks} (${percent}%)`));
+      }
+    };
+
+    const result = await executor.execute(onProgress);
+
+    // Step 10: Output results
+    if (options.json) {
+      console.log(JSON.stringify({
+        success: result.success,
+        tasks: result.tasks.map(t => ({
+          taskId: t.taskId,
+          description: t.taskDescription,
+          status: t.status,
+          duration: t.duration,
+          filesChanged: t.filesChanged,
+          outputPath: t.outputPath,
+          error: t.error,
+          costEstimate: t.costEstimate
+        })),
+        summary: result.summary,
+        reportPath: result.reportPath
+      }, null, 2));
+    } else {
+      console.log('');
+      console.log(chalk.bold('📊 Execution Summary'));
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log(`Total tasks: ${result.tasks.length}`);
+      console.log(chalk.green(`✓ Successful: ${result.summary.successCount}`));
+      if (result.summary.failureCount > 0) {
+        console.log(chalk.red(`✗ Failed: ${result.summary.failureCount}`));
+      }
+      if (result.summary.cancelledCount > 0) {
+        console.log(chalk.gray(`○ Cancelled: ${result.summary.cancelledCount}`));
+      }
+      console.log(`Total duration: ${formatDuration(result.summary.totalDuration)}`);
+      console.log(`Time saved: ${formatDuration(result.summary.timeSaved)} (vs sequential)`);
+      console.log(`Files changed: ${result.summary.totalFilesChanged}`);
+      console.log(`Estimated cost: $${result.summary.totalCost.toFixed(2)}`);
+      console.log(chalk.dim('─'.repeat(50)));
+
+      if (result.reportPath) {
+        console.log(`\nFull report: ${result.reportPath}`);
+      }
+      console.log(`Results directory: ${outputDir}`);
+
+      // Show failed tasks
+      const failedTasks = result.tasks.filter(t => t.status === 'failed');
+      if (failedTasks.length > 0) {
+        console.log('');
+        console.log(chalk.red.bold('Failed Tasks:'));
+        for (const task of failedTasks) {
+          console.log(chalk.red(`  ${task.taskId}: ${task.error || 'Unknown error'}`));
+        }
+      }
+    }
+
+    // Exit with appropriate code
+    process.exit(result.success ? 0 : 1);
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    if (options.json) {
+      console.log(JSON.stringify({ success: false, error: errorMessage }));
+    } else {
+      console.error(chalk.red(`\n✗ Parallel execution failed: ${errorMessage}`));
+    }
+    process.exit(1);
+  } finally {
+    coordinator.close();
+  }
+}
+
+/**
+ * Format duration in milliseconds to human-readable string
+ */
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  } else {
+    return `${seconds}s`;
+  }
 }
 
 /**
